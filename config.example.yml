@@ -1,0 +1,31 @@
+####################################################################
+# PitLane Server Agent — Configuration
+# Copier ce fichier en config.yml et remplir les valeurs
+# Redémarrage de l'agent requis pour appliquer les changements
+####################################################################
+
+http:
+  host: 0.0.0.0
+  port: 8180
+  base_url: https://ton-serveur.example.com
+
+game:
+  install_path: C:\ACE
+  executable_name: AssettoCorsaEVOServer.exe
+  configs_path: C:\ACE\configs
+  results_path: C:\ACE\Results
+
+instances:
+  - id: server1
+    name: "Serveur principal"
+    tcp_port: 9700
+    udp_port: 9700
+    http_port: 8080
+
+auth:
+  jwt_secret: CHANGE_ME_SAME_AS_SYMFONY
+  jwt_algorithm: HS256
+
+logging:
+  log_file: C:\ACE\serverConfig\Assetto Corsa EVO Server.txt
+  max_lines: 500

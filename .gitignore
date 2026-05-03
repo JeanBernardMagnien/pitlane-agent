@@ -1,0 +1,14 @@
+# Secrets
+config.yml
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# VS Code
+.vscode/
+
+# Logs debug
+debug_*.txt
