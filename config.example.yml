@@ -23,7 +23,7 @@ instances:
     http_port: 8080
 
 auth:
-  jwt_secret: CHANGE_ME_SAME_AS_SYMFONY
+  jwt_secret: CHANGE_ME_SAME_AS_APP_SECRET_SYMFONY
   jwt_algorithm: HS256
 
 logging:
