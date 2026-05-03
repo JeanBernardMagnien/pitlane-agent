@@ -59,6 +59,7 @@ Le secret JWT est partagé avec le hub Symfony (`auth.jwt_secret` dans `config.y
 
 ## Structure
 
+```
 pitlane-server-agent/
 ├── app.py               ← Flask — routes API REST
 ├── server_manager.py    ← gestion des process Windows
@@ -68,6 +69,7 @@ pitlane-server-agent/
 ├── config.example.yml   ← exemple de configuration
 ├── requirements.txt     ← dépendances Python
 └── install.ps1          ← installation automatique
+```
 
 ## Déploiement sur un nouveau serveur
 
