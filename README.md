@@ -29,7 +29,7 @@ Copier `config.example.yml` en `config.yml` et renseigner :
 
 | Clé | Description |
 |---|---|
-| `http.port` | Port de l'agent Flask (défaut : 8182) |
+| `http.port` | Port de l'agent Flask (défaut : 8180) |
 | `http.base_url` | URL publique du serveur |
 | `game.install_path` | Dossier d'installation AC EVO |
 | `auth.jwt_secret` | Secret partagé avec le hub Symfony |
