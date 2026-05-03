@@ -97,7 +97,7 @@ def instance_start(instance_id):
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
-        return error(f"Config '{filename}' introuvable"), 404
+        return error(f"Config '{filename}' introuvable", 404)
 
     try:
         serverconfig_b64, seasondefinition_b64 = encode_file(str(config_path))
@@ -132,7 +132,7 @@ def instance_restart(instance_id):
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
-        return error(f"Config '{filename}' introuvable"), 404
+        return error(f"Config '{filename}' introuvable", 404)
 
     try:
         serverconfig_b64, seasondefinition_b64 = encode_file(str(config_path))
@@ -211,7 +211,7 @@ def instance_switch(instance_id):
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
-        return error(f"Config '{filename}' introuvable"), 404
+        return error(f"Config '{filename}' introuvable", 404)
 
     try:
         serverconfig_b64, seasondefinition_b64 = encode_file(str(config_path))
