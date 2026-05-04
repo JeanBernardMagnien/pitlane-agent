@@ -1,6 +1,9 @@
 import yaml
 import json
 import jwt as pyjwt
+import threading
+import os
+import psutil as _psutil
 from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from server_manager import (
@@ -14,13 +17,61 @@ from datetime import datetime, timezone
 
 # ─── Chargement config ────────────────────────────────────────────────────────
 
-with open('config.yml', 'r', encoding='utf-8') as f:
-    CFG = yaml.safe_load(f)
+CONFIG_PATH = Path('config.yml')
 
+def load_config():
+    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+def save_config(cfg: dict):
+    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+
+CFG = load_config()
 GAME_CFG  = CFG['game']
 AUTH_CFG  = CFG['auth']
 HTTP_CFG  = CFG['http']
 INSTANCES = {inst['id']: inst for inst in CFG['instances']}
+
+_config_lock = threading.Lock()
+_config_mtime = CONFIG_PATH.stat().st_mtime
+
+def _watch_config():
+    """Thread de surveillance — recharge config.yml si modifié."""
+    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, INSTANCES, _config_mtime
+    while True:
+        threading.Event().wait(1)
+        try:
+            mtime = CONFIG_PATH.stat().st_mtime
+            if mtime != _config_mtime:
+                new_cfg = load_config()
+                with _config_lock:
+                    CFG        = new_cfg
+                    GAME_CFG   = new_cfg['game']
+                    AUTH_CFG   = new_cfg['auth']
+                    HTTP_CFG   = new_cfg['http']
+                    INSTANCES  = {inst['id']: inst for inst in new_cfg['instances']}
+                    _config_mtime = mtime
+                print(f"[config] Rechargé — {len(INSTANCES)} instance(s)")
+        except Exception as e:
+            print(f"[config] Erreur rechargement : {e}")
+
+_watcher = threading.Thread(target=_watch_config, daemon=True)
+_watcher.start()
+
+# ─── Infos système ────────────────────────────────────────────────────────────
+
+def get_system_info() -> dict:
+    cpu_cores = _psutil.cpu_count(logical=False) or 1
+    max_instances = cpu_cores // 2
+    return {
+        'cpu_cores': cpu_cores,
+        'cpu_threads': _psutil.cpu_count(logical=True),
+        'max_instances': max_instances,
+        'current_instances': len(INSTANCES),
+    }
+
+# ─── Flask ────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 sock = Sock(app)
@@ -29,18 +80,17 @@ sock = Sock(app)
 
 @sock.route('/api/instances/<instance_id>/logs/stream')
 def logs_stream(ws, instance_id):
-    if instance_id not in INSTANCES:
+    with _config_lock:
+        known = instance_id in INSTANCES
+    if not known:
         ws.send('{"error": "Instance introuvable"}')
         return
-
     log_file = CFG['logging']['log_file']
     max_lines = CFG['logging'].get('max_lines', 500)
-
     try:
         tail_log(ws, log_file, max_lines)
     except Exception:
         pass
-
 
 # ─── Auth JWT ─────────────────────────────────────────────────────────────────
 
@@ -61,40 +111,119 @@ def require_jwt():
     except pyjwt.InvalidTokenError:
         abort(401, 'Token invalide')
 
-
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def get_instance_or_404(instance_id: str) -> dict:
-    if instance_id not in INSTANCES:
+    with _config_lock:
+        inst = INSTANCES.get(instance_id)
+    if not inst:
         abort(404, f"Instance '{instance_id}' introuvable dans config.yml")
-    return INSTANCES[instance_id]
-
+    return inst
 
 def error(msg: str, code: int = 400):
     return jsonify({'error': msg}), code
 
-
 def resolve_filename(instance_id: str, body: dict) -> str | None:
-    """
-    Retourne le filename à utiliser pour start/restart :
-    - Priorité 1 : filename passé dans le body de la requête
-    - Priorité 2 : dernière config mémorisée (survit au stop)
-    """
     filename = body.get('filename')
     if filename:
         return filename
     last = get_last_config(instance_id)
     return last.get('config')
 
+# ─── Système ──────────────────────────────────────────────────────────────────
 
-# ─── Instances ────────────────────────────────────────────────────────────────
+@app.route('/api/system', methods=['GET'])
+def system_info():
+    require_jwt()
+    return jsonify(get_system_info())
+
+# ─── Instances — CRUD ─────────────────────────────────────────────────────────
 
 @app.route('/api/instances', methods=['GET'])
 def list_instances():
     require_jwt()
-    statuses = [get_instance_status(inst) for inst in INSTANCES.values()]
+    with _config_lock:
+        insts = list(INSTANCES.values())
+    statuses = [get_instance_status(inst) for inst in insts]
     return jsonify(statuses)
 
+@app.route('/api/instances', methods=['POST'])
+def create_instance():
+    require_jwt()
+    body = request.get_json(silent=True) or {}
+
+    # Validation
+    required = ['id', 'name', 'tcp_port', 'udp_port', 'http_port']
+    for field in required:
+        if not body.get(field):
+            return error(f"Champ '{field}' requis")
+
+    info = get_system_info()
+    if info['current_instances'] >= info['max_instances']:
+        return error(
+            f"Limite atteinte : {info['max_instances']} instance(s) max "
+            f"pour {info['cpu_cores']} cœurs physiques", 403
+        )
+
+    instance_id = str(body['id']).strip()
+    with _config_lock:
+        if instance_id in INSTANCES:
+            return error(f"Instance '{instance_id}' existe déjà")
+
+    # Vérif unicité des ports
+    new_ports = {int(body['tcp_port']), int(body['udp_port']), int(body['http_port'])}
+    with _config_lock:
+        for inst in INSTANCES.values():
+            existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
+            conflict = new_ports & existing_ports
+            if conflict:
+                return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
+
+    new_inst = {
+        'id':        instance_id,
+        'name':      str(body['name']).strip(),
+        'tcp_port':  int(body['tcp_port']),
+        'udp_port':  int(body['udp_port']),
+        'http_port': int(body['http_port']),
+    }
+
+    # Écriture dans config.yml → le watcher rechargera automatiquement
+    cfg = load_config()
+    cfg['instances'].append(new_inst)
+    save_config(cfg)
+
+    # Rechargement immédiat sans attendre le watcher
+    global _config_mtime
+    with _config_lock:
+        INSTANCES[instance_id] = new_inst
+        _config_mtime = CONFIG_PATH.stat().st_mtime
+
+    return jsonify(new_inst), 201
+
+
+@app.route('/api/instances/<instance_id>', methods=['DELETE'])
+def delete_instance(instance_id):
+    require_jwt()
+    with _config_lock:
+        if instance_id not in INSTANCES:
+            return error(f"Instance '{instance_id}' introuvable", 404)
+
+    # Impossible de supprimer une instance en cours
+    if instance_id in _running and _running[instance_id]['process'].poll() is None:
+        return error("Arrêtez l'instance avant de la supprimer", 409)
+
+    cfg = load_config()
+    cfg['instances'] = [i for i in cfg['instances'] if i['id'] != instance_id]
+    save_config(cfg)
+
+    global _config_mtime
+    with _config_lock:
+        INSTANCES.pop(instance_id, None)
+        _config_mtime = CONFIG_PATH.stat().st_mtime
+
+    return jsonify({'deleted': instance_id})
+
+# ─── Instances — Actions ──────────────────────────────────────────────────────
 
 @app.route('/api/instances/<instance_id>/status', methods=['GET'])
 def instance_status(instance_id):
@@ -110,9 +239,8 @@ def instance_start(instance_id):
 
     body = request.get_json(silent=True) or {}
     filename = resolve_filename(instance_id, body)
-
     if not filename:
-        return error('Aucune config disponible — chargez d\'abord une config via "Charger"', 400)
+        return error("Aucune config disponible — chargez d'abord une config via \"Charger\"")
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
@@ -146,9 +274,8 @@ def instance_restart(instance_id):
 
     body = request.get_json(silent=True) or {}
     filename = resolve_filename(instance_id, body)
-
     if not filename:
-        return error('Aucune config disponible — chargez d\'abord une config via "Charger"', 400)
+        return error("Aucune config disponible — chargez d'abord une config via \"Charger\"")
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
@@ -161,7 +288,6 @@ def instance_restart(instance_id):
 
     result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify(result)
-
 
 # ─── Configs ──────────────────────────────────────────────────────────────────
 
@@ -240,7 +366,6 @@ def instance_switch(instance_id):
     result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify({**result, 'loaded_config': filename})
 
-
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 
 @app.route('/api/instances/<instance_id>/logs', methods=['GET'])
@@ -256,7 +381,6 @@ def instance_logs(instance_id):
 
     lines = log_file.read_text(encoding='utf-8', errors='replace').splitlines()
     return jsonify({'lines': lines[-max_lines:]})
-
 
 # ─── Lancement ────────────────────────────────────────────────────────────────
 
