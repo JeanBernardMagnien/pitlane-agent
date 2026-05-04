@@ -16,13 +16,16 @@ _last_config = {}
 
 
 def _get_connected_drivers(http_port: int) -> int | None:
-    """Interroge l'API HTTP d'AC EVO pour compter les pilotes connectés."""
+    """
+    Interroge l'API HTTP d'AC EVO pour compter les pilotes connectés.
+    AC EVO expose GET / sur http_port et retourne {"clients": N, "version": X, "protocol": Y}.
+    """
     try:
-        url = f"http://127.0.0.1:{http_port}/api/details"
-        with urllib.request.urlopen(url, timeout=1) as resp:
+        url = f"http://127.0.0.1:{http_port}/"
+        req = urllib.request.Request(url, headers={'User-Agent': 'PitLane/1.0'})
+        with urllib.request.urlopen(req, timeout=1) as resp:
             data = _json.loads(resp.read())
-            cars = data.get('cars', [])
-            return sum(1 for c in cars if c.get('isConnected', False))
+            return data.get('clients', None)
     except Exception:
         return None
 
@@ -56,7 +59,6 @@ def start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b6
         'config': filename,
         'config_loaded_at': now,
     }
-    # Mémorise aussi dans _last_config si on a un filename
     if filename:
         _last_config[instance_id] = {
             'config': filename,
@@ -71,7 +73,6 @@ def stop_instance(instance_id: str) -> dict:
     if instance_id not in _running:
         return {'error': f"Instance {instance_id} non trouvée"}
 
-    # Sauvegarde la config avant suppression
     info = _running[instance_id]
     if info.get('config'):
         _last_config[instance_id] = {
@@ -111,7 +112,6 @@ def get_instance_status(instance_cfg: dict) -> dict:
     http_port = instance_cfg.get('http_port')
 
     if not info or info['process'].poll() is not None:
-        # Nettoyage si le process est mort
         if instance_id in _running:
             dead_info = _running.pop(instance_id)
             if dead_info.get('config'):
