@@ -3,6 +3,7 @@ import json
 import jwt as pyjwt
 import threading
 import os
+import subprocess
 import psutil as _psutil
 from pathlib import Path
 from flask import Flask, jsonify, request, abort
@@ -194,6 +195,7 @@ def list_instances():
 
 @app.route('/api/instances', methods=['POST'])
 def create_instance():
+    global _config_mtime
     require_jwt()
     body = request.get_json(silent=True) or {}
 
@@ -246,7 +248,6 @@ def create_instance():
     save_config(cfg)
 
     # Rechargement immédiat sans attendre le watcher
-    global _config_mtime
     with _config_lock:
         INSTANCES[instance_id] = new_inst
         _config_mtime = CONFIG_PATH.stat().st_mtime
@@ -259,6 +260,7 @@ def create_instance():
 
 @app.route('/api/instances/<instance_id>', methods=['DELETE'])
 def delete_instance(instance_id):
+    global _config_mtime
     require_jwt()
     with _config_lock:
         if instance_id not in INSTANCES:
@@ -276,7 +278,6 @@ def delete_instance(instance_id):
     cfg['instances'] = [i for i in cfg['instances'] if i['id'] != instance_id]
     save_config(cfg)
 
-    global _config_mtime
     with _config_lock:
         INSTANCES.pop(instance_id, None)
         _config_mtime = CONFIG_PATH.stat().st_mtime
