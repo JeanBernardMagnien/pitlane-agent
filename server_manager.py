@@ -3,11 +3,12 @@ import psutil
 import time
 from pathlib import Path
 import os
+from datetime import datetime, timezone
 
 # Dictionnaire en mémoire : { instance_id → { process, started_at, config } }
 _running = {}
 
-def start_instance(instance_cfg: dict, game_cfg: dict, serverconfig_b64: str, seasondefinition_b64: str) -> dict:
+def start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b64, filename=None):
     instance_id = instance_cfg['id']
 
     if instance_id in _running:
@@ -34,7 +35,8 @@ def start_instance(instance_cfg: dict, game_cfg: dict, serverconfig_b64: str, se
     _running[instance_id] = {
         'process': process,
         'started_at': time.time(),
-        'config': None,
+        'config': filename,
+        'config_loaded_at': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
     }
 
     return {'status': 'started', 'pid': process.pid}
@@ -82,6 +84,7 @@ def get_instance_status(instance_cfg: dict) -> dict:
             'ram_mb': None,
             'active_config': info.get('config') if info else None,
             'active_config_loaded_at': info.get('config_loaded_at') if info else None,
+            'tcp_port': instance_cfg.get('tcp_port'),
         }
 
     pid = info['process'].pid
@@ -89,7 +92,8 @@ def get_instance_status(instance_cfg: dict) -> dict:
 
     try:
         ps_proc = psutil.Process(pid)
-        ram_mb = round(ps_proc.memory_info().rss / 1024 / 1024, 1)
+        mem = ps_proc.memory_info()
+        ram_mb = round(mem.wset / 1024 / 1024, 1)
     except psutil.NoSuchProcess:
         ram_mb = None
 
@@ -99,10 +103,11 @@ def get_instance_status(instance_cfg: dict) -> dict:
         'status': 'online',
         'pid': pid,
         'uptime_seconds': uptime,
-        'started_at': datetime.utcfromtimestamp(info['started_at']).isoformat() + 'Z',
+        'started_at': datetime.fromtimestamp(info['started_at'], tz=timezone.utc).isoformat().replace('+00:00', 'Z'),
         'ram_mb': ram_mb,
         'active_config': info.get('config'),
         'active_config_loaded_at': info.get('config_loaded_at'),
+        'tcp_port': instance_cfg.get('tcp_port'),
     }
 
 

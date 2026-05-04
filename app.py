@@ -5,12 +5,12 @@ from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from server_manager import (
     start_instance, stop_instance, restart_instance,
-    get_instance_status, list_configs
+    get_instance_status, list_configs, _running
 )
 from encode_config import encode_file
 from flask_sock import Sock
 from log_streamer import tail_log
-from datetime import datetime
+from datetime import datetime, timezone
 
 # ─── Chargement config ────────────────────────────────────────────────────────
 
@@ -51,7 +51,12 @@ def require_jwt():
         abort(401, 'Token manquant')
     token = auth_header[7:]
     try:
-        pyjwt.decode(token, AUTH_CFG['jwt_secret'], algorithms=[AUTH_CFG['jwt_algorithm']])
+        pyjwt.decode(
+            token,
+            AUTH_CFG['jwt_secret'],
+            algorithms=[AUTH_CFG['jwt_algorithm']],
+            leeway=30
+        )
     except pyjwt.ExpiredSignatureError:
         abort(401, 'Token expiré')
     except pyjwt.InvalidTokenError:
@@ -105,7 +110,7 @@ def instance_start(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = start_instance(inst, GAME_CFG, serverconfig_b64, seasondefinition_b64)
+    result = start_instance(inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     if 'error' in result:
         return jsonify(result), 409
     return jsonify(result)
@@ -201,7 +206,6 @@ def config_delete(filename):
 
 @app.route('/api/instances/<instance_id>/switch', methods=['POST'])
 def instance_switch(instance_id):
-    """Charge une nouvelle config sur une instance et la redémarre."""
     require_jwt()
     inst = get_instance_or_404(instance_id)
 
@@ -221,12 +225,13 @@ def instance_switch(instance_id):
 
     result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64)
 
-    # On enregistre la config active seulement si le restart a réussi
-    if result.get('status') == 'online':
+    # Avant : if result.get('status') == 'online'  ← jamais vrai
+    if 'error' not in result and instance_id in _running:
         _running[instance_id]['config'] = filename
-        _running[instance_id]['config_loaded_at'] = datetime.utcnow().isoformat() + 'Z'
+        _running[instance_id]['config_loaded_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
     return jsonify({**result, 'loaded_config': filename})
+
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 
