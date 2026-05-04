@@ -10,6 +10,7 @@ from server_manager import (
 from encode_config import encode_file
 from flask_sock import Sock
 from log_streamer import tail_log
+from datetime import datetime
 
 # ─── Chargement config ────────────────────────────────────────────────────────
 
@@ -219,8 +220,13 @@ def instance_switch(instance_id):
         return error(f"Erreur encodage config : {e}")
 
     result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64)
-    return jsonify({**result, 'loaded_config': filename})
 
+    # On enregistre la config active seulement si le restart a réussi
+    if result.get('status') == 'online':
+        _running[instance_id]['config'] = filename
+        _running[instance_id]['config_loaded_at'] = datetime.utcnow().isoformat() + 'Z'
+
+    return jsonify({**result, 'loaded_config': filename})
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
 

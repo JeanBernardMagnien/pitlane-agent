@@ -78,8 +78,10 @@ def get_instance_status(instance_cfg: dict) -> dict:
             'status': 'offline',
             'pid': None,
             'uptime_seconds': None,
+            'started_at': None,
             'ram_mb': None,
-            'active_config': None,
+            'active_config': info.get('config') if info else None,
+            'active_config_loaded_at': info.get('config_loaded_at') if info else None,
         }
 
     pid = info['process'].pid
@@ -97,8 +99,10 @@ def get_instance_status(instance_cfg: dict) -> dict:
         'status': 'online',
         'pid': pid,
         'uptime_seconds': uptime,
+        'started_at': datetime.utcfromtimestamp(info['started_at']).isoformat() + 'Z',
         'ram_mb': ram_mb,
         'active_config': info.get('config'),
+        'active_config_loaded_at': info.get('config_loaded_at'),
     }
 
 
