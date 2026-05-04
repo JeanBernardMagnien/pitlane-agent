@@ -5,7 +5,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from server_manager import (
     start_instance, stop_instance, restart_instance,
-    get_instance_status, list_configs, _running
+    get_instance_status, get_last_config, list_configs, _running
 )
 from encode_config import encode_file
 from flask_sock import Sock
@@ -23,7 +23,7 @@ HTTP_CFG  = CFG['http']
 INSTANCES = {inst['id']: inst for inst in CFG['instances']}
 
 app = Flask(__name__)
-sock = Sock(app)  
+sock = Sock(app)
 
 # ─── WebSocket Logs ───────────────────────────────────────────────────────────
 
@@ -39,7 +39,6 @@ def logs_stream(ws, instance_id):
     try:
         tail_log(ws, log_file, max_lines)
     except Exception:
-        # Client déconnecté — on sort proprement
         pass
 
 
@@ -75,6 +74,19 @@ def error(msg: str, code: int = 400):
     return jsonify({'error': msg}), code
 
 
+def resolve_filename(instance_id: str, body: dict) -> str | None:
+    """
+    Retourne le filename à utiliser pour start/restart :
+    - Priorité 1 : filename passé dans le body de la requête
+    - Priorité 2 : dernière config mémorisée (survit au stop)
+    """
+    filename = body.get('filename')
+    if filename:
+        return filename
+    last = get_last_config(instance_id)
+    return last.get('config')
+
+
 # ─── Instances ────────────────────────────────────────────────────────────────
 
 @app.route('/api/instances', methods=['GET'])
@@ -97,9 +109,10 @@ def instance_start(instance_id):
     inst = get_instance_or_404(instance_id)
 
     body = request.get_json(silent=True) or {}
-    filename = body.get('filename')
+    filename = resolve_filename(instance_id, body)
+
     if not filename:
-        return error('filename requis')
+        return error('Aucune config disponible — chargez d\'abord une config via "Charger"', 400)
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
@@ -132,9 +145,10 @@ def instance_restart(instance_id):
     inst = get_instance_or_404(instance_id)
 
     body = request.get_json(silent=True) or {}
-    filename = body.get('filename')
+    filename = resolve_filename(instance_id, body)
+
     if not filename:
-        return error('filename requis')
+        return error('Aucune config disponible — chargez d\'abord une config via "Charger"', 400)
 
     config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
@@ -145,7 +159,7 @@ def instance_restart(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64)
+    result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify(result)
 
 
@@ -223,13 +237,7 @@ def instance_switch(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64)
-
-    # Avant : if result.get('status') == 'online'  ← jamais vrai
-    if 'error' not in result and instance_id in _running:
-        _running[instance_id]['config'] = filename
-        _running[instance_id]['config_loaded_at'] = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-
+    result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify({**result, 'loaded_config': filename})
 
 
