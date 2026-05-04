@@ -71,6 +71,51 @@ def get_system_info() -> dict:
         'current_instances': len(INSTANCES),
     }
 
+# ─── Firewall helpers ─────────────────────────────────────────────────────────
+
+def _fw_rule_name(instance_id: str, port: int, proto: str) -> str:
+    return f"PitLane-{instance_id}-{proto}-{port}"
+
+def _open_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
+    """Ouvre les ports nécessaires dans le firewall Windows."""
+    rules = [
+        (tcp_port,  'TCP', 'jeu AC EVO TCP'),
+        (udp_port,  'UDP', 'jeu AC EVO UDP'),
+        (http_port, 'TCP', 'HTTP statut AC EVO'),
+    ]
+    errors = []
+    for port, proto, desc in rules:
+        name = _fw_rule_name(instance_id, port, proto)
+        cmd = [
+            'powershell', '-NonInteractive', '-Command',
+            f'New-NetFirewallRule -DisplayName "{name}" '
+            f'-Direction Inbound -Protocol {proto} '
+            f'-LocalPort {port} -Action Allow -ErrorAction Stop'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            errors.append(f"{proto}/{port}: {result.stderr.strip()}")
+    return errors
+
+def _close_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
+    """Supprime les règles firewall de l'instance."""
+    rules = [
+        (tcp_port,  'TCP'),
+        (udp_port,  'UDP'),
+        (http_port, 'TCP'),
+    ]
+    errors = []
+    for port, proto in rules:
+        name = _fw_rule_name(instance_id, port, proto)
+        cmd = [
+            'powershell', '-NonInteractive', '-Command',
+            f'Remove-NetFirewallRule -DisplayName "{name}" -ErrorAction SilentlyContinue'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            errors.append(f"{proto}/{port}: {result.stderr.strip()}")
+    return errors
+
 # ─── Flask ────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -187,6 +232,14 @@ def create_instance():
         'http_port': int(body['http_port']),
     }
 
+    # Ouverture des ports firewall
+    fw_errors = _open_ports(
+        instance_id,
+        int(body['tcp_port']),
+        int(body['udp_port']),
+        int(body['http_port']),
+    )
+
     # Écriture dans config.yml → le watcher rechargera automatiquement
     cfg = load_config()
     cfg['instances'].append(new_inst)
@@ -198,7 +251,10 @@ def create_instance():
         INSTANCES[instance_id] = new_inst
         _config_mtime = CONFIG_PATH.stat().st_mtime
 
-    return jsonify(new_inst), 201
+    response = {**new_inst}
+    if fw_errors:
+        response['fw_warnings'] = fw_errors
+    return jsonify(response), 201
 
 
 @app.route('/api/instances/<instance_id>', methods=['DELETE'])
@@ -212,6 +268,10 @@ def delete_instance(instance_id):
     if instance_id in _running and _running[instance_id]['process'].poll() is None:
         return error("Arrêtez l'instance avant de la supprimer", 409)
 
+    # Récupère les ports avant suppression
+    with _config_lock:
+        inst_data = INSTANCES.get(instance_id, {})
+
     cfg = load_config()
     cfg['instances'] = [i for i in cfg['instances'] if i['id'] != instance_id]
     save_config(cfg)
@@ -221,7 +281,18 @@ def delete_instance(instance_id):
         INSTANCES.pop(instance_id, None)
         _config_mtime = CONFIG_PATH.stat().st_mtime
 
-    return jsonify({'deleted': instance_id})
+    # Fermeture des ports firewall
+    fw_errors = _close_ports(
+        instance_id,
+        inst_data.get('tcp_port', 0),
+        inst_data.get('udp_port', 0),
+        inst_data.get('http_port', 0),
+    )
+
+    response = {'deleted': instance_id}
+    if fw_errors:
+        response['fw_warnings'] = fw_errors
+    return jsonify(response)
 
 # ─── Instances — Actions ──────────────────────────────────────────────────────
 
