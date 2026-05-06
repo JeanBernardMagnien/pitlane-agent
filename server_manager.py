@@ -133,6 +133,7 @@ def get_instance_status(instance_cfg: dict) -> dict:
             'active_config': last.get('config'),
             'active_config_loaded_at': last.get('config_loaded_at'),
             'tcp_port': instance_cfg.get('tcp_port'),
+            'http_port': instance_cfg.get('http_port'),
         }
 
     pid = info['process'].pid
@@ -158,6 +159,7 @@ def get_instance_status(instance_cfg: dict) -> dict:
         'active_config': info.get('config'),
         'active_config_loaded_at': info.get('config_loaded_at'),
         'tcp_port': instance_cfg.get('tcp_port'),
+        'http_port': instance_cfg.get('http_port'),
     }
 
 
