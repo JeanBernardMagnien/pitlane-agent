@@ -131,12 +131,6 @@ if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContin
     Write-Host "      Port $agentPort deja ouvert" -ForegroundColor Gray
 }
 
-# --- Suppression du script ---
-Write-Host ""
-Write-Host "  Nettoyage..." -ForegroundColor Gray
-Remove-Item -Path "$AgentPath\install.ps1" -Force
-Write-Host "  install.ps1 supprime" -ForegroundColor Gray
-
 # --- Resume ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -148,3 +142,11 @@ Write-Host "  1. Edite config.yml (jwt_secret, base_url)" -ForegroundColor White
 Write-Host "  2. Redemarre le serveur ou lance : python app.py" -ForegroundColor White
 Write-Host "  3. Ajoute ce serveur dans le hub PitLane" -ForegroundColor White
 Write-Host ""
+
+# --- Suppression du script ---
+Write-Host "  Nettoyage..." -ForegroundColor Gray
+Remove-Item -Path "$AgentPath\install.ps1" -Force
+Write-Host "  install.ps1 supprime" -ForegroundColor Gray
+Write-Host ""
+
+Read-Host "  Appuie sur Entree pour fermer"
