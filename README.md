@@ -45,11 +45,12 @@ Les chemins du jeu sont remplis automatiquement par `install.ps1`.
 ## Structure des logs
 
 Chaque instance génère son propre fichier de log horodaté :
-
+```
 logs/
 ├── log_server1_2026-05-06_19-00-00.log
 ├── log_server1_2026-05-06_21-00-00.log
 └── log_server2_2026-05-06_19-00-00.log
+```
 
 ## API REST
 
@@ -80,7 +81,7 @@ Authorization: Bearer <token>
 Le secret JWT est partagé avec le hub Symfony (`auth.jwt_secret` dans `config.yml`).
 
 ## Structure du projet
-
+```
 pitlane-server-agent/
 ├── app.py               ← Flask — routes API REST
 ├── server_manager.py    ← gestion des process Windows
@@ -90,6 +91,7 @@ pitlane-server-agent/
 ├── config.example.yml   ← template de configuration
 ├── requirements.txt     ← dépendances Python
 └── install.ps1          ← installation automatique (se supprime après)
+```
 
 ## Mise à jour d'AC EVO
 
