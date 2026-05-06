@@ -152,6 +152,16 @@ foreach ($rule in $defaultPorts) {
     }
 }
 
+# Ajout instance par defaut
+$config = $config -replace 'instances: \[\]', "instances:
+  - id: server1
+    name: Serveur principal
+    tcp_port: 9700
+    udp_port: 9700
+    http_port: 8080"
+
+$config | Set-Content "$AgentPath\config.yml" -Encoding UTF8
+
 # --- Resume ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
