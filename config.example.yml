@@ -16,12 +16,7 @@ game:
   configs_path: CONFIGS_PATH
   results_path: RESULTS_PATH
 
-instances:
-  - id: server1
-    name: "Serveur principal"
-    tcp_port: 9700
-    udp_port: 9700
-    http_port: 8080
+instances: []
 
 auth:
   jwt_secret: CHANGE_ME_SAME_AS_APP_SECRET_SYMFONY

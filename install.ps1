@@ -137,6 +137,21 @@ if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContin
     Write-Host "      Port $agentPort deja ouvert" -ForegroundColor Gray
 }
 
+# Ports instance par defaut (server1)
+$defaultPorts = @(
+    @{ name = "PitLane-server1-TCP-9700"; port = 9700; proto = "TCP" },
+    @{ name = "PitLane-server1-UDP-9700"; port = 9700; proto = "UDP" },
+    @{ name = "PitLane-server1-TCP-8080"; port = 8080; proto = "TCP" }
+)
+foreach ($rule in $defaultPorts) {
+    if (-not (Get-NetFirewallRule -DisplayName $rule.name -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $rule.name -Direction Inbound -Protocol $rule.proto -LocalPort $rule.port -Action Allow | Out-Null
+        Write-Host "      Port $($rule.port)/$($rule.proto) (server1) ouvert" -ForegroundColor Green
+    } else {
+        Write-Host "      Port $($rule.port)/$($rule.proto) (server1) deja ouvert" -ForegroundColor Gray
+    }
+}
+
 # --- Resume ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
