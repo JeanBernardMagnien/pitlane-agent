@@ -10,10 +10,10 @@ http:
   base_url: https://ton-serveur.example.com
 
 game:
-  install_path: C:\ACE
+  install_path: C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server
   executable_name: AssettoCorsaEVOServer.exe
-  configs_path: C:\ACE\configs
-  results_path: C:\ACE\Results
+  configs_path: C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server\configs
+  results_path: C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server\Results
 
 instances:
   - id: server1
