@@ -28,18 +28,19 @@ def save_config(cfg: dict):
     with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
         yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
 
-CFG = load_config()
-GAME_CFG  = CFG['game']
-AUTH_CFG  = CFG['auth']
-HTTP_CFG  = CFG['http']
-INSTANCES = {inst['id']: inst for inst in CFG['instances']}
+CFG         = load_config()
+GAME_CFG    = CFG['game']
+AUTH_CFG    = CFG['auth']
+HTTP_CFG    = CFG['http']
+LOGGING_CFG = CFG['logging']
+INSTANCES   = {inst['id']: inst for inst in CFG['instances']}
 
 _config_lock = threading.Lock()
 _config_mtime = CONFIG_PATH.stat().st_mtime
 
 def _watch_config():
     """Thread de surveillance — recharge config.yml si modifié."""
-    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, INSTANCES, _config_mtime
+    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG, INSTANCES, _config_mtime
     while True:
         threading.Event().wait(1)
         try:
@@ -47,11 +48,12 @@ def _watch_config():
             if mtime != _config_mtime:
                 new_cfg = load_config()
                 with _config_lock:
-                    CFG        = new_cfg
-                    GAME_CFG   = new_cfg['game']
-                    AUTH_CFG   = new_cfg['auth']
-                    HTTP_CFG   = new_cfg['http']
-                    INSTANCES  = {inst['id']: inst for inst in new_cfg['instances']}
+                    CFG         = new_cfg
+                    GAME_CFG    = new_cfg['game']
+                    AUTH_CFG    = new_cfg['auth']
+                    HTTP_CFG    = new_cfg['http']
+                    LOGGING_CFG = new_cfg['logging']
+                    INSTANCES   = {inst['id']: inst for inst in new_cfg['instances']}
                     _config_mtime = mtime
                 print(f"[config] Rechargé — {len(INSTANCES)} instance(s)")
         except Exception as e:
@@ -131,10 +133,17 @@ def logs_stream(ws, instance_id):
     if not known:
         ws.send('{"error": "Instance introuvable"}')
         return
-    log_file = CFG['logging']['log_file']
-    max_lines = CFG['logging'].get('max_lines', 500)
+
+    logs_path = Path(LOGGING_CFG['logs_path'])
+    max_lines = LOGGING_CFG.get('max_lines', 500)
+
+    log_files = sorted(logs_path.glob(f"log_{instance_id}_*.log"), reverse=True)
+    if not log_files:
+        ws.send('{"error": "Aucun log disponible pour cette instance"}')
+        return
+
     try:
-        tail_log(ws, log_file, max_lines)
+        tail_log(ws, str(log_files[0]), max_lines)
     except Exception:
         pass
 
@@ -199,7 +208,6 @@ def create_instance():
     require_jwt()
     body = request.get_json(silent=True) or {}
 
-    # Validation
     required = ['id', 'name', 'tcp_port', 'udp_port', 'http_port']
     for field in required:
         if not body.get(field):
@@ -217,7 +225,6 @@ def create_instance():
         if instance_id in INSTANCES:
             return error(f"Instance '{instance_id}' existe déjà")
 
-    # Vérif unicité des ports
     new_ports = {int(body['tcp_port']), int(body['udp_port']), int(body['http_port'])}
     with _config_lock:
         for inst in INSTANCES.values():
@@ -234,7 +241,6 @@ def create_instance():
         'http_port': int(body['http_port']),
     }
 
-    # Ouverture des ports firewall
     fw_errors = _open_ports(
         instance_id,
         int(body['tcp_port']),
@@ -242,12 +248,10 @@ def create_instance():
         int(body['http_port']),
     )
 
-    # Écriture dans config.yml → le watcher rechargera automatiquement
     cfg = load_config()
     cfg['instances'].append(new_inst)
     save_config(cfg)
 
-    # Rechargement immédiat sans attendre le watcher
     with _config_lock:
         INSTANCES[instance_id] = new_inst
         _config_mtime = CONFIG_PATH.stat().st_mtime
@@ -266,11 +270,9 @@ def delete_instance(instance_id):
         if instance_id not in INSTANCES:
             return error(f"Instance '{instance_id}' introuvable", 404)
 
-    # Impossible de supprimer une instance en cours
     if instance_id in _running and _running[instance_id]['process'].poll() is None:
         return error("Arrêtez l'instance avant de la supprimer", 409)
 
-    # Récupère les ports avant suppression
     with _config_lock:
         inst_data = INSTANCES.get(instance_id, {})
 
@@ -282,7 +284,6 @@ def delete_instance(instance_id):
         INSTANCES.pop(instance_id, None)
         _config_mtime = CONFIG_PATH.stat().st_mtime
 
-    # Fermeture des ports firewall
     fw_errors = _close_ports(
         instance_id,
         inst_data.get('tcp_port', 0),
@@ -323,7 +324,7 @@ def instance_start(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = start_instance(inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+    result = start_instance(inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     if 'error' in result:
         return jsonify(result), 409
     return jsonify(result)
@@ -358,7 +359,7 @@ def instance_restart(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+    result = restart_instance(instance_id, inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify(result)
 
 # ─── Configs ──────────────────────────────────────────────────────────────────
@@ -435,7 +436,7 @@ def instance_switch(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = restart_instance(instance_id, inst, GAME_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+    result = restart_instance(instance_id, inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify({**result, 'loaded_config': filename})
 
 # ─── Logs ─────────────────────────────────────────────────────────────────────
@@ -445,13 +446,14 @@ def instance_logs(instance_id):
     require_jwt()
     get_instance_or_404(instance_id)
 
-    log_file = Path(CFG['logging']['log_file'])
-    max_lines = CFG['logging'].get('max_lines', 500)
+    logs_path = Path(LOGGING_CFG['logs_path'])
+    max_lines = LOGGING_CFG.get('max_lines', 500)
 
-    if not log_file.exists():
+    log_files = sorted(logs_path.glob(f"log_{instance_id}_*.log"), reverse=True)
+    if not log_files:
         return jsonify({'lines': []})
 
-    lines = log_file.read_text(encoding='utf-8', errors='replace').splitlines()
+    lines = log_files[0].read_text(encoding='utf-8', errors='replace').splitlines()
     return jsonify({'lines': lines[-max_lines:]})
 
 # ─── Lancement ────────────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
 
-# { instance_id → { process, started_at, config, config_loaded_at } }
+# { instance_id → { process, started_at, config, config_loaded_at, log_file } }
 _running = {}
 
 # Survit au stop/crash — garde la dernière config connue par instance
@@ -30,7 +30,18 @@ def _get_connected_drivers(http_port: int) -> int | None:
         return None
 
 
-def start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b64, filename=None):
+def _open_log_file(instance_id: str, logs_path: str):
+    """Ouvre le fichier de log pour une instance avec un timestamp de démarrage."""
+    logs_dir = Path(logs_path)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_path = logs_dir / f"log_{instance_id}_{timestamp}.log"
+
+    return open(log_path, 'a', encoding='utf-8')
+
+
+def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=None):
     instance_id = instance_cfg['id']
 
     if instance_id in _running:
@@ -38,6 +49,7 @@ def start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b6
             return {'error': f"Instance {instance_id} déjà en cours d'exécution"}
 
     exe_path = Path(game_cfg['install_path']) / game_cfg['executable_name']
+    log_file = _open_log_file(instance_id, logging_cfg['logs_path'])
 
     args = [
         str(exe_path),
@@ -48,8 +60,8 @@ def start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b6
     process = subprocess.Popen(
         args,
         cwd=game_cfg['install_path'],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=log_file,
+        stderr=log_file,
     )
 
     now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
@@ -58,6 +70,7 @@ def start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b6
         'started_at': time.time(),
         'config': filename,
         'config_loaded_at': now,
+        'log_file': log_file,
     }
     if filename:
         _last_config[instance_id] = {
@@ -87,17 +100,21 @@ def stop_instance(instance_id: str) -> dict:
     except subprocess.TimeoutExpired:
         proc.kill()
 
+    # Fermeture propre du fichier de log
+    if info.get('log_file'):
+        info['log_file'].close()
+
     del _running[instance_id]
     return {'status': 'stopped'}
 
 
 def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
-                     serverconfig_b64: str, seasondefinition_b64: str,
-                     filename: str | None = None) -> dict:
+                     logging_cfg: dict, serverconfig_b64: str,
+                     seasondefinition_b64: str, filename: str | None = None) -> dict:
     """Stop + Start en conservant le filename."""
     stop_instance(instance_id)
     time.sleep(2)
-    return start_instance(instance_cfg, game_cfg, serverconfig_b64, seasondefinition_b64, filename=filename)
+    return start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=filename)
 
 
 def get_last_config(instance_id: str) -> dict:
@@ -114,6 +131,9 @@ def get_instance_status(instance_cfg: dict) -> dict:
     if not info or info['process'].poll() is not None:
         if instance_id in _running:
             dead_info = _running.pop(instance_id)
+            # Fermeture propre du fichier de log si crash
+            if dead_info.get('log_file'):
+                dead_info['log_file'].close()
             if dead_info.get('config'):
                 _last_config[instance_id] = {
                     'config': dead_info['config'],

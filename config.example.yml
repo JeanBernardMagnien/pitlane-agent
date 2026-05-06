@@ -1,7 +1,8 @@
 ####################################################################
 # PitLane Server Agent — Configuration
-# Copier ce fichier en config.yml et remplir les valeurs
-# Redémarrage de l'agent requis pour appliquer les changements
+# Ce fichier est utilisé comme template par install.ps1
+# Les chemins sont remplis automatiquement à l'installation
+# Seuls jwt_secret et base_url sont à renseigner manuellement
 ####################################################################
 
 http:
@@ -10,10 +11,10 @@ http:
   base_url: https://ton-serveur.example.com
 
 game:
-  install_path: C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server
+  install_path: INSTALL_PATH
   executable_name: AssettoCorsaEVOServer.exe
-  configs_path: C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server\configs
-  results_path: C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server\Results
+  configs_path: CONFIGS_PATH
+  results_path: RESULTS_PATH
 
 instances:
   - id: server1
@@ -27,5 +28,5 @@ auth:
   jwt_algorithm: HS256
 
 logging:
-  log_file: C:\ACE\serverConfig\Assetto Corsa EVO Server.txt
+  logs_path: LOGS_PATH
   max_lines: 500
