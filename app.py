@@ -261,6 +261,67 @@ def create_instance():
         response['fw_warnings'] = fw_errors
     return jsonify(response), 201
 
+@app.route('/api/instances/<instance_id>', methods=['PUT'])
+def update_instance(instance_id):
+    global _config_mtime
+    require_jwt()
+
+    with _config_lock:
+        if instance_id not in INSTANCES:
+            return error(f"Instance '{instance_id}' introuvable", 404)
+
+    # Impossible de modifier une instance en cours
+    if instance_id in _running and _running[instance_id]['process'].poll() is None:
+        return error("Arrêtez l'instance avant de la modifier", 409)
+
+    body = request.get_json(silent=True) or {}
+
+    # Récupère l'ancienne instance pour comparer les ports
+    with _config_lock:
+        old_inst = INSTANCES[instance_id].copy()
+
+    new_inst = {
+        'id':        instance_id,
+        'name':      str(body.get('name', old_inst['name'])).strip(),
+        'tcp_port':  int(body.get('tcp_port', old_inst['tcp_port'])),
+        'udp_port':  int(body.get('udp_port', old_inst['udp_port'])),
+        'http_port': int(body.get('http_port', old_inst['http_port'])),
+    }
+
+    # Vérif unicité des ports si changés
+    new_ports = {new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port']}
+    old_ports = {old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port']}
+
+    if new_ports != old_ports:
+        with _config_lock:
+            for iid, inst in INSTANCES.items():
+                if iid == instance_id:
+                    continue
+                existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
+                conflict = new_ports & existing_ports
+                if conflict:
+                    return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
+
+        # Mise à jour des règles firewall si les ports ont changé
+        _close_ports(instance_id, old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port'])
+        fw_errors = _open_ports(instance_id, new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port'])
+    else:
+        fw_errors = []
+
+    # Sauvegarde dans config.yml
+    cfg = load_config()
+    cfg['instances'] = [new_inst if i['id'] == instance_id else i for i in cfg['instances']]
+    save_config(cfg)
+
+    with _config_lock:
+        INSTANCES[instance_id] = new_inst
+        _config_mtime = CONFIG_PATH.stat().st_mtime
+
+    response = {**new_inst}
+    if fw_errors:
+        response['fw_warnings'] = fw_errors
+    return jsonify(response)
+
 
 @app.route('/api/instances/<instance_id>', methods=['DELETE'])
 def delete_instance(instance_id):
