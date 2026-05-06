@@ -115,11 +115,12 @@ if (-not $pythonPath) {
     $pythonPath = (Get-Command python).Source
 }
 
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
 $action = New-ScheduledTaskAction -Execute $pythonPath -Argument "`"$AgentPath\app.py`"" -WorkingDirectory $AgentPath
 $trigger  = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0)
 
-Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -RunLevel Highest -Force | Out-Null
+Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null
 Write-Host "      OK : tache 'PitLaneAgent' creee" -ForegroundColor Green
 
 # --- 6. Ports firewall ---
