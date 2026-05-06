@@ -110,8 +110,12 @@ if ($existing) {
     Write-Host "      Ancienne tache supprimee" -ForegroundColor Gray
 }
 
-$pythonPath = (Get-Command python).Source
-$action     = New-ScheduledTaskAction -Execute $pythonPath -Argument "$AgentPath\app.py" -WorkingDirectory $AgentPath
+$pythonPath = (where.exe python 2>$null | Select-Object -First 1)
+if (-not $pythonPath) {
+    $pythonPath = (Get-Command python).Source
+}
+
+$action = New-ScheduledTaskAction -Execute $pythonPath -Argument "`"$AgentPath\app.py`"" -WorkingDirectory $AgentPath
 $trigger  = New-ScheduledTaskTrigger -AtStartup
 $settings = New-ScheduledTaskSettingsSet -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Hours 0)
 
