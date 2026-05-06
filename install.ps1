@@ -82,10 +82,10 @@ if (-not (Test-Path "$AgentPath\config.yml")) {
         $config = Get-Content "$AgentPath\config.example.yml" -Raw
 
         # Remplacement automatique des chemins
-        $config = $config -replace 'INSTALL_PATH', $SteamPath
-        $config = $config -replace 'CONFIGS_PATH', $ConfigsPath
-        $config = $config -replace 'RESULTS_PATH', $ResultsPath
-        $config = $config -replace 'LOGS_PATH',    $LogsPath
+        $config = $config.Replace('INSTALL_PATH', $SteamPath)
+        $config = $config.Replace('CONFIGS_PATH', $ConfigsPath)
+        $config = $config.Replace('RESULTS_PATH', $ResultsPath)
+        $config = $config.Replace('LOGS_PATH',    $LogsPath)
 
         $config | Set-Content "$AgentPath\config.yml" -Encoding UTF8
 
