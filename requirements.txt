@@ -1,6 +1,0 @@
-flask==3.1.0
-flask-sock==0.7.0
-pyyaml==6.0.2
-psutil==6.1.0
-pyjwt==2.10.1
-waitress==3.0.1
