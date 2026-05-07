@@ -1,0 +1,37 @@
+####################################################################
+# PitLane Agent — Configuration
+# Ce fichier est utilisé comme template par les installers
+# Les chemins sont remplis automatiquement à l'installation
+####################################################################
+
+http:
+  host: 0.0.0.0
+  port: 8181
+  base_url: https://ton-serveur.example.com
+
+game:
+  install_path: INSTALL_PATH
+  executable_name: AssettoCorsaEVOServer.exe
+  configs_path: CONFIGS_PATH
+  results_path: RESULTS_PATH
+
+steam:
+  steamcmd_path: STEAMCMD_PATH         # auto-rempli par les installers
+  app_id: 4564210
+  appmanifest_path: APPMANIFEST_PATH   # auto-rempli par les installers
+  # si steamcmd_path est vide : mise à jour à distance désactivée
+
+instances:
+  - id: server1
+    name: Serveur 1
+    tcp_port: 9700
+    udp_port: 9700
+    http_port: 8081
+
+auth:
+  jwt_secret: CHANGE_ME_SAME_AS_APP_SECRET_SYMFONY
+  jwt_algorithm: HS256
+
+logging:
+  logs_path: LOGS_PATH
+  max_lines: 500
