@@ -7,18 +7,18 @@
 http:
   host: 0.0.0.0
   port: 8181
-  base_url: "__BASE_URL__"
+  base_url: __BASE_URL__
 
 game:
-  install_path: "__INSTALL_PATH__"
+  install_path: __INSTALL_PATH__
   executable_name: AssettoCorsaEVOServer.exe
-  configs_path: "__CONFIGS_PATH__"
-  results_path: "__RESULTS_PATH__"
+  configs_path: __CONFIGS_PATH__
+  results_path: __RESULTS_PATH__
 
 steam:
-  steamcmd_path: "__STEAMCMD_PATH__"
+  steamcmd_path: __STEAMCMD_PATH__
   app_id: 4564210
-  appmanifest_path: "__APPMANIFEST_PATH__"
+  appmanifest_path: __APPMANIFEST_PATH__
 
 instances:
   - id: server1
@@ -28,9 +28,9 @@ instances:
     http_port: 8081
 
 auth:
-  jwt_secret: "__JWT_SECRET__"
+  jwt_secret: __JWT_SECRET__
   jwt_algorithm: HS256
 
 logging:
-  logs_path: "__LOGS_PATH__"
+  logs_path: __LOGS_PATH__
   max_lines: 500
