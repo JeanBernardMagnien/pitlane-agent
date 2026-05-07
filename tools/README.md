@@ -1,20 +1,12 @@
 # Outils de développement
 
-## `dev-reset-test-env.ps1`
-
-Script de reset pour tester les installateurs PitLane sur un serveur Windows.
+## `uninstaller.ps1`t Script de désinstallation / reset pour tester les installateurs PitLane sur un serveur Windows, ou remettre proprement une installation de test.ur Windows, ou reOutil de développement / maintenance uniquement. de test.
 
 > [!WARNING]
-> Outil de développement uniquement.
-> Ne pas inclure dans `agent.zip`.
+> Outil de développement / maintenance uniqtools/uninstaller.ps1ans `agent.## Ce que fait la désinstallation standardxt
+> tools/uninstaller.ps1
 
----
-
-## Emplacement
-
-```txt
-tools/dev-reset-test-env.ps1
-```
+````
 
 ---
 
@@ -24,7 +16,7 @@ Commande :
 
 ```powershell
 .\tools\dev-reset-test-env.ps1
-```
+````
 
 Supprime uniquement :
 
@@ -94,23 +86,22 @@ Les suppressions avancées demandent une confirmation manuelle :
 RESET-PITLANE
 ```
 
-Le script ne supprime jamais SteamCMD, AC EVO ou les dépendances Python sans option explicite.
+Le script ne supprime jamais SteamCMD, AC EVO ou les déDésinstallation standard : sans option explicite.
 
 ---
 
 ## Exemples rapides
 
-Reset standard :
-
-```powershell
+Reset stanshell
 .\tools\dev-reset-test-env.ps1
-```
+
+````
 
 Reset complet serveur vierge :
 
 ```powershell
 .\tools\dev-reset-test-env.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
-```
+````
 
 Test sans rien supprimer :
 

@@ -1,5 +1,20 @@
 #Requires -RunAsAdministrator
 
+<#
+PitLane uninstaller / reset tool.
+
+Usage prévu : tests d'installation, maintenance et remise à zéro contrôlée.
+Par défaut, le script supprime uniquement :
+- l'agent PitLane
+- la tâche planifiée PitLaneAgent
+- les règles firewall préfixées "PitLane -"
+
+Les suppressions avancées nécessitent des options explicites :
+-RemoveSteamCmd
+-RemoveAcEvoServer
+-RemovePythonDeps
+#>
+
 param(
     [switch]$RemoveSteamCmd,
     [switch]$RemoveAcEvoServer,
@@ -10,7 +25,7 @@ param(
 $ErrorActionPreference = "Continue"
 
 Write-Host ""
-Write-Host "=== PitLane DEV reset test environment ===" -ForegroundColor Cyan
+Write-Host "=== PitLane uninstaller / reset tool ===" -ForegroundColor Cyan
 Write-Host ""
 
 function Confirm-DangerousAction {
@@ -76,7 +91,7 @@ function Find-SteamCmd {
 }
 
 if ($RemoveSteamCmd -or $RemoveAcEvoServer -or $RemovePythonDeps) {
-    Confirm-DangerousAction "Attention : tu as demandé une suppression avancée."
+    Confirm-DangerousAction "Attention : tu as demandé une suppression avancée. SteamCMD, AC EVO ou des dépendances Python peuvent être supprimés."
 }
 
 Write-Host "[1] Arrêt de l'agent PitLane" -ForegroundColor Cyan
@@ -185,4 +200,4 @@ if ($RemovePythonDeps) {
 }
 
 Write-Host ""
-Write-Host "Reset terminé." -ForegroundColor Green
+Write-Host "Désinstallation / reset terminé." -ForegroundColor Green
