@@ -1,10 +1,13 @@
 import yaml
 import json
+import re
 import jwt as pyjwt
 import threading
 import os
 import subprocess
 import psutil as _psutil
+import urllib.request
+import urllib.parse
 from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from server_manager import (
@@ -61,6 +64,11 @@ def _watch_config():
 
 _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
+
+# ─── Steam update process tracker ─────────────────────────────────────────────
+
+_steam_process = None
+_steam_process_lock = threading.Lock()
 
 # ─── Infos système ────────────────────────────────────────────────────────────
 
@@ -270,13 +278,11 @@ def update_instance(instance_id):
         if instance_id not in INSTANCES:
             return error(f"Instance '{instance_id}' introuvable", 404)
 
-    # Impossible de modifier une instance en cours
     if instance_id in _running and _running[instance_id]['process'].poll() is None:
         return error("Arrêtez l'instance avant de la modifier", 409)
 
     body = request.get_json(silent=True) or {}
 
-    # Récupère l'ancienne instance pour comparer les ports
     with _config_lock:
         old_inst = INSTANCES[instance_id].copy()
 
@@ -288,7 +294,6 @@ def update_instance(instance_id):
         'http_port': int(body.get('http_port', old_inst['http_port'])),
     }
 
-    # Vérif unicité des ports si changés
     new_ports = {new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port']}
     old_ports = {old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port']}
 
@@ -302,13 +307,11 @@ def update_instance(instance_id):
                 if conflict:
                     return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
 
-        # Mise à jour des règles firewall si les ports ont changé
         _close_ports(instance_id, old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port'])
         fw_errors = _open_ports(instance_id, new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port'])
     else:
         fw_errors = []
 
-    # Sauvegarde dans config.yml
     cfg = load_config()
     cfg['instances'] = [new_inst if i['id'] == instance_id else i for i in cfg['instances']]
     save_config(cfg)
@@ -516,6 +519,124 @@ def instance_logs(instance_id):
 
     lines = log_files[0].read_text(encoding='utf-8', errors='replace').splitlines()
     return jsonify({'lines': lines[-max_lines:]})
+
+# ─── Steam ────────────────────────────────────────────────────────────────────
+
+@app.route('/api/steam/update', methods=['POST'])
+def steam_update():
+    global _steam_process
+    require_jwt()
+
+    with _config_lock:
+        steam_cfg = CFG.get('steam', {})
+        logs_path = LOGGING_CFG['logs_path']
+        install_path = GAME_CFG['install_path']
+
+    steamcmd_path = steam_cfg.get('steamcmd_path', '')
+    if not steamcmd_path:
+        return error('Mise à jour à distance non configurée', 503)
+
+    running_instances = [
+        iid for iid, info in _running.items()
+        if info['process'].poll() is None
+    ]
+    if running_instances:
+        return error('Arrêtez les instances avant de mettre à jour', 409)
+
+    body = request.get_json(silent=True) or {}
+    username = body.get('steam_username')
+    password = body.get('steam_password')
+    if not username or not password:
+        return error('steam_username et steam_password requis', 400)
+
+    app_id = str(steam_cfg.get('app_id', 4564210))
+
+    logs_dir = Path(logs_path)
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / 'steam_update.log'
+
+    cmd = [
+        steamcmd_path,
+        '+force_install_dir', install_path,
+        '+login', username, password,
+        '+app_update', app_id, 'validate',
+        '+quit',
+    ]
+
+    with _steam_process_lock:
+        log_file = open(str(log_path), 'w', encoding='utf-8')
+        process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file)
+        _steam_process = {'process': process, 'log_file': log_file}
+
+    return jsonify({'status': 'started', 'pid': process.pid}), 202
+
+
+@app.route('/api/steam/update/logs', methods=['GET'])
+def steam_update_logs():
+    require_jwt()
+
+    with _config_lock:
+        logs_path = LOGGING_CFG['logs_path']
+
+    log_path = Path(logs_path) / 'steam_update.log'
+    if not log_path.exists():
+        return jsonify({'lines': [], 'finished': True})
+
+    lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines()[-100:]
+
+    with _steam_process_lock:
+        proc = _steam_process.get('process') if _steam_process else None
+        finished = proc is None or proc.poll() is not None
+
+    return jsonify({'lines': lines, 'finished': finished})
+
+
+@app.route('/api/steam/update-check', methods=['GET'])
+def steam_update_check():
+    require_jwt()
+
+    with _config_lock:
+        steam_cfg = CFG.get('steam', {})
+
+    appmanifest_path = steam_cfg.get('appmanifest_path', '')
+    if not appmanifest_path:
+        return error('Chemin appmanifest non configuré', 503)
+
+    manifest_file = Path(appmanifest_path)
+    if not manifest_file.exists():
+        return error(f"appmanifest introuvable : {appmanifest_path}", 404)
+
+    content = manifest_file.read_text(encoding='utf-8', errors='replace')
+    match = re.search(r'"buildid"\s+"(\d+)"', content)
+    if not match:
+        return error('buildid introuvable dans appmanifest', 500)
+
+    local_buildid = int(match.group(1))
+    app_id = steam_cfg.get('app_id', 4564210)
+
+    try:
+        params = urllib.parse.urlencode({
+            'appid': app_id,
+            'version': local_buildid,
+            'format': 'json',
+        })
+        url = f"https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/?{params}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'PitLane/1.0'})
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+    except Exception as e:
+        return error(f"Erreur API Steam : {e}", 502)
+
+    response_data = data.get('response', {})
+    up_to_date = response_data.get('up_to_date', False)
+    remote_build = response_data.get('required_version')
+
+    return jsonify({
+        'up_to_date': up_to_date,
+        'local_build': local_buildid,
+        'remote_build': remote_build,
+        'update_available': not up_to_date,
+    })
 
 # ─── Lancement ────────────────────────────────────────────────────────────────
 

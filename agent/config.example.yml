@@ -1,13 +1,12 @@
 ####################################################################
-# PitLane Server Agent — Configuration
-# Ce fichier est utilisé comme template par install.ps1
+# PitLane Agent — Configuration
+# Ce fichier est utilisé comme template par les installers
 # Les chemins sont remplis automatiquement à l'installation
-# Seuls jwt_secret et base_url sont à renseigner manuellement
 ####################################################################
 
 http:
   host: 0.0.0.0
-  port: 8180
+  port: 8181
   base_url: https://ton-serveur.example.com
 
 game:
@@ -16,7 +15,18 @@ game:
   configs_path: CONFIGS_PATH
   results_path: RESULTS_PATH
 
-instances: []
+steam:
+  steamcmd_path: STEAMCMD_PATH         # auto-rempli par les installers
+  app_id: 4564210
+  appmanifest_path: APPMANIFEST_PATH   # auto-rempli par les installers
+  # si steamcmd_path est vide : mise à jour à distance désactivée
+
+instances:
+  - id: server1
+    name: Serveur 1
+    tcp_port: 9700
+    udp_port: 9700
+    http_port: 8081
 
 auth:
   jwt_secret: CHANGE_ME_SAME_AS_APP_SECRET_SYMFONY

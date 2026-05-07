@@ -75,7 +75,6 @@ def encode_file(filepath: str) -> tuple[str, str]:
     return _encode(server_config), _encode(season_def)
 
 
-# Permet de toujours l'utiliser en ligne de commande aussi
 if __name__ == '__main__':
     sc, sd = encode_file(sys.argv[1])
     print(f"-serverconfig {sc} -seasondefinition {sd}")

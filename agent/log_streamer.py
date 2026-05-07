@@ -9,13 +9,11 @@ def tail_log(ws, log_file: str, max_lines: int = 100):
     """
     path = Path(log_file)
 
-    # 1. Envoie l'historique récent dès la connexion
     if path.exists():
         lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
         for line in lines[-max_lines:]:
             ws.send(line)
 
-    # 2. Surveille les nouvelles lignes (tail -f)
     last_size = path.stat().st_size if path.exists() else 0
 
     while True:
@@ -26,7 +24,6 @@ def tail_log(ws, log_file: str, max_lines: int = 100):
 
         current_size = path.stat().st_size
 
-        # Fichier a grandi → nouvelles lignes
         if current_size > last_size:
             with open(path, 'r', encoding='utf-8', errors='replace') as f:
                 f.seek(last_size)
@@ -36,6 +33,5 @@ def tail_log(ws, log_file: str, max_lines: int = 100):
                     ws.send(line)
             last_size = current_size
 
-        # Fichier a rétréci → log rotaté, on repart de zéro
         elif current_size < last_size:
             last_size = current_size

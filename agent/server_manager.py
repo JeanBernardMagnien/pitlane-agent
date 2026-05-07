@@ -100,7 +100,6 @@ def stop_instance(instance_id: str) -> dict:
     except subprocess.TimeoutExpired:
         proc.kill()
 
-    # Fermeture propre du fichier de log
     if info.get('log_file'):
         info['log_file'].close()
 
@@ -131,7 +130,6 @@ def get_instance_status(instance_cfg: dict) -> dict:
     if not info or info['process'].poll() is not None:
         if instance_id in _running:
             dead_info = _running.pop(instance_id)
-            # Fermeture propre du fichier de log si crash
             if dead_info.get('log_file'):
                 dead_info['log_file'].close()
             if dead_info.get('config'):
