@@ -1,22 +1,30 @@
 # Outils de développement
 
-## `uninstaller.ps1`t Script de désinstallation / reset pour tester les installateurs PitLane sur un serveur Windows, ou remettre proprement une installation de test.ur Windows, ou reOutil de développement / maintenance uniquement. de test.
+## `uninstaller.ps1`
+
+Script de désinstallation / reset pour tester les installateurs PitLane sur un serveur Windows, ou remettre proprement une installation de test.
 
 > [!WARNING]
-> Outil de développement / maintenance uniqtools/uninstaller.ps1ans `agent.## Ce que fait la désinstallation standardxt
-> tools/uninstaller.ps1
-
-````
+> Outil de développement / maintenance uniquement.
+> Ne pas inclure dans `agent.zip`.
 
 ---
 
-## Ce que fait le reset standard
+## Emplacement
+
+```txt
+tools/uninstaller.ps1
+```
+
+---
+
+## Ce que fait la désinstallation standard
 
 Commande :
 
 ```powershell
-.\tools\dev-reset-test-env.ps1
-````
+.\tools\uninstaller.ps1
+```
 
 Supprime uniquement :
 
@@ -38,7 +46,7 @@ Ne supprime pas :
 Permet de voir ce qui serait supprimé sans rien supprimer réellement.
 
 ```powershell
-.\tools\dev-reset-test-env.ps1 -DryRun
+.\tools\uninstaller.ps1 -DryRun
 ```
 
 ---
@@ -46,7 +54,7 @@ Permet de voir ce qui serait supprimé sans rien supprimer réellement.
 ## Simulation : AC EVO installé, sans SteamCMD
 
 ```powershell
-.\tools\dev-reset-test-env.ps1 -RemoveSteamCmd
+.\tools\uninstaller.ps1 -RemoveSteamCmd
 ```
 
 ---
@@ -54,7 +62,7 @@ Permet de voir ce qui serait supprimé sans rien supprimer réellement.
 ## Simulation : SteamCMD installé, sans AC EVO
 
 ```powershell
-.\tools\dev-reset-test-env.ps1 -RemoveAcEvoServer
+.\tools\uninstaller.ps1 -RemoveAcEvoServer
 ```
 
 ---
@@ -62,7 +70,7 @@ Permet de voir ce qui serait supprimé sans rien supprimer réellement.
 ## Simulation : serveur vierge
 
 ```powershell
-.\tools\dev-reset-test-env.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
+.\tools\uninstaller.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
 ```
 
 ---
@@ -86,27 +94,28 @@ Les suppressions avancées demandent une confirmation manuelle :
 RESET-PITLANE
 ```
 
-Le script ne supprime jamais SteamCMD, AC EVO ou les déDésinstallation standard : sans option explicite.
+Le script ne supprime jamais SteamCMD, AC EVO ou les dépendances Python sans option explicite.
 
 ---
 
 ## Exemples rapides
 
-Reset stanshell
-.\tools\dev-reset-test-env.ps1
+Désinstallation standard :
 
-````
+```powershell
+.\tools\uninstaller.ps1
+```
 
 Reset complet serveur vierge :
 
 ```powershell
-.\tools\dev-reset-test-env.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
-````
+.\tools\uninstaller.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
+```
 
 Test sans rien supprimer :
 
 ```powershell
-.\tools\dev-reset-test-env.ps1 -DryRun
+.\tools\uninstaller.ps1 -DryRun
 ```
 
 ---
