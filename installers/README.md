@@ -63,20 +63,6 @@ Invoke-WebRequest `
 
 ---
 
-## Telecharger les deux installateurs
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.ps1" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-agent.ps1"
-
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.ps1" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-full.ps1"
-```
-
----
-
 ## Lancer `setup-agent.ps1`
 
 A utiliser si AC EVO Dedicated Server est deja installe.
