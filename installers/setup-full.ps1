@@ -1,15 +1,17 @@
 #Requires -RunAsAdministrator
+
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-# ─── Fonctions utilitaires ──────────────────────────────────────────────────
+# Utility functions
 
 function Find-AcEvoServer {
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
     foreach ($drive in $drives) {
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
-                               -Recurse -Depth 6 -ErrorAction SilentlyContinue `
-                               | Select-Object -First 1
+            -Recurse -Depth 6 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
         if ($found) { return $found.DirectoryName }
     }
     return $null
@@ -17,17 +19,26 @@ function Find-AcEvoServer {
 
 function Get-AppManifestPath {
     param($SteamCmdExePath)
+
     $steamapps = Join-Path (Split-Path $SteamCmdExePath) "steamapps"
     return "$steamapps\appmanifest_4564210.acf"
 }
 
 function Download-Agent {
     param($DestinationPath)
+
     $url = "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/agent.zip"
     $zip = "$env:TEMP\pitlane-agent.zip"
+
+    if (Test-Path $DestinationPath) {
+        Remove-Item -Path $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+
     Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
     Expand-Archive -Path $zip -DestinationPath $DestinationPath -Force
-    Remove-Item $zip
+    Remove-Item $zip -Force -ErrorAction SilentlyContinue
 }
 
 function New-JwtSecret {
@@ -38,28 +49,46 @@ function New-JwtSecret {
 
 function Get-PublicIp {
     try {
-        return (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing).Content.Trim()
+        $ip = (Invoke-WebRequest -Uri "https://api.ipify.org" -UseBasicParsing -TimeoutSec 10).Content.Trim()
+
+        if ([string]::IsNullOrWhiteSpace($ip)) {
+            return "IP_A_REMPLACER"
+        }
+
+        return $ip
     } catch {
-        return "INCONNUE"
+        return "IP_A_REMPLACER"
     }
 }
 
-# ─── Vérification préalable ────────────────────────────────────────────────
+function Add-LogSafe {
+    param(
+        [System.Windows.Forms.TextBox]$LogBox,
+        [string]$Message
+    )
+
+    if (-not $Message) { return }
+    $LogBox.AppendText("$Message`r`n")
+    $LogBox.ScrollToCaret()
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+# Pre-check
 
 $existing = Find-AcEvoServer
 if ($existing) {
     [System.Windows.Forms.MessageBox]::Show(
-        "AC EVO Dedicated Server déjà détecté ($existing).`nLance setup-agent.ps1 pour installer uniquement l'agent.",
+        "AC EVO Dedicated Server deja detecte ($existing).`nLance setup-agent.ps1 pour installer uniquement l'agent.",
         "Erreur", "OK", "Error"
     )
     exit 1
 }
 
-# ─── Interface principale ────────────────────────────────────────────────
+# Main UI
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = "PitLane — Installation complète"
-$form.Size = New-Object System.Drawing.Size(680, 640)
+$form.Text = "PitLane - Installation complete"
+$form.Size = New-Object System.Drawing.Size(680, 790)
 $form.StartPosition = "CenterScreen"
 $form.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
 $form.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
@@ -68,7 +97,7 @@ $form.FormBorderStyle = "FixedDialog"
 $form.MaximizeBox = $false
 
 $titleLabel = New-Object System.Windows.Forms.Label
-$titleLabel.Text = "Installation complète — steamcmd + AC EVO + Agent"
+$titleLabel.Text = "Installation complete - steamcmd + AC EVO + Agent"
 $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 12, [System.Drawing.FontStyle]::Bold)
 $titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 136)
 $titleLabel.Location = New-Object System.Drawing.Point(20, 14)
@@ -84,23 +113,23 @@ $form.Controls.Add($stepsPanel)
 
 $steps = @(
     "[1] Choix dossier steamcmd",
-    "[2] Téléchargement steamcmd",
+    "[2] Telechargement steamcmd",
     "[3] Choix dossier AC EVO",
     "[4] Saisie credentials Steam",
-    "[5] Téléchargement AC EVO",
+    "[5] Telechargement AC EVO",
     "[6] Installation agent",
-    "[7] Vérification Python",
-    "[8] Installation dépendances",
-    "[9] Génération config.yml",
-    "[10] Tâche planifiée Windows",
-    "[11] Règles firewall",
-    "[12] Terminé"
+    "[7] Verification Python",
+    "[8] Installation dependances",
+    "[9] Generation config.yml",
+    "[10] Tache planifiee Windows",
+    "[11] Regles firewall",
+    "[12] Termine"
 )
 
 $stepLabels = @()
 for ($i = 0; $i -lt $steps.Count; $i++) {
     $lbl = New-Object System.Windows.Forms.Label
-    $lbl.Text = "⏳ " + $steps[$i]
+    $lbl.Text = "WAIT " + $steps[$i]
     $lbl.Location = New-Object System.Drawing.Point(10, (4 + $i * 32))
     $lbl.Size = New-Object System.Drawing.Size(610, 26)
     $lbl.ForeColor = [System.Drawing.Color]::FromArgb(139, 148, 158)
@@ -115,8 +144,8 @@ $progressBar.Maximum = $steps.Count
 $form.Controls.Add($progressBar)
 
 $logBox = New-Object System.Windows.Forms.TextBox
-$logBox.Location = New-Object System.Drawing.Point(20, 477)
-$logBox.Size = New-Object System.Drawing.Size(630, 80)
+$logBox.Location = New-Object System.Drawing.Point(20, 478)
+$logBox.Size = New-Object System.Drawing.Size(630, 145)
 $logBox.Multiline = $true
 $logBox.ScrollBars = "Vertical"
 $logBox.ReadOnly = $true
@@ -127,28 +156,29 @@ $form.Controls.Add($logBox)
 
 function Set-StepStatus {
     param($index, $status)
+
     $label = $stepLabels[$index]
-    $base  = $steps[$index]
+    $base = $steps[$index]
+
     switch ($status) {
-        "running" { $label.Text = "▶ $base"; $label.ForeColor = [System.Drawing.Color]::FromArgb(240, 165, 0) }
-        "ok"      { $label.Text = "✓ $base"; $label.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 136) }
-        "error"   { $label.Text = "✗ $base"; $label.ForeColor = [System.Drawing.Color]::FromArgb(255, 68, 68) }
-        "skip"    { $label.Text = "— $base"; $label.ForeColor = [System.Drawing.Color]::FromArgb(110, 118, 129) }
+        "running" { $label.Text = "> $base";     $label.ForeColor = [System.Drawing.Color]::FromArgb(240, 165, 0) }
+        "ok"      { $label.Text = "OK $base";    $label.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 136) }
+        "error"   { $label.Text = "ERROR $base"; $label.ForeColor = [System.Drawing.Color]::FromArgb(255, 68, 68) }
+        "skip"    { $label.Text = "SKIP $base";  $label.ForeColor = [System.Drawing.Color]::FromArgb(110, 118, 129) }
     }
+
     $progressBar.Value = [Math]::Min($index + 1, $progressBar.Maximum)
     [System.Windows.Forms.Application]::DoEvents()
 }
 
 function Add-Log {
     param($msg)
-    $logBox.AppendText("$msg`r`n")
-    $logBox.ScrollToCaret()
-    [System.Windows.Forms.Application]::DoEvents()
+    Add-LogSafe -LogBox $logBox -Message $msg
 }
 
 $closeBtn = New-Object System.Windows.Forms.Button
 $closeBtn.Text = "Fermer"
-$closeBtn.Location = New-Object System.Drawing.Point(540, 600)
+$closeBtn.Location = New-Object System.Drawing.Point(540, 730)
 $closeBtn.Size = New-Object System.Drawing.Size(110, 28)
 $closeBtn.BackColor = [System.Drawing.Color]::FromArgb(0, 255, 136)
 $closeBtn.ForeColor = [System.Drawing.Color]::Black
@@ -157,7 +187,7 @@ $closeBtn.Visible = $false
 $closeBtn.Add_Click({ $form.Close() })
 $form.Controls.Add($closeBtn)
 
-# ─── Installation ───────────────────────────────────────────────────────────
+# Installation
 
 $form.Add_Shown({
     $form.Activate()
@@ -167,21 +197,26 @@ $form.Add_Shown({
     $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
     $dlg.Description = "Choisissez le dossier d'installation de steamcmd (ex: C:\SteamCMD)"
     $dlg.SelectedPath = "C:\SteamCMD"
+
     if ($dlg.ShowDialog() -ne "OK") { $form.Close(); return }
+
     $SteamCmdDir = $dlg.SelectedPath
     $SteamCmdExe = "$SteamCmdDir\steamcmd.exe"
     Add-Log "Dossier steamcmd : $SteamCmdDir"
     Set-StepStatus 0 "ok"
 
-    # [2] Téléchargement steamcmd
+    # [2] Telechargement steamcmd
     Set-StepStatus 1 "running"
     try {
-        Add-Log "Téléchargement steamcmd…"
+        Add-Log "Telechargement steamcmd"
+        New-Item -ItemType Directory -Path $SteamCmdDir -Force | Out-Null
         $zip = "$env:TEMP\steamcmd.zip"
+
         Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" `
             -OutFile $zip -UseBasicParsing
         Expand-Archive -Path $zip -DestinationPath $SteamCmdDir -Force
-        Remove-Item $zip
+        Remove-Item $zip -Force -ErrorAction SilentlyContinue
+
         Add-Log "steamcmd extrait : $SteamCmdExe"
         Set-StepStatus 1 "ok"
     } catch {
@@ -196,7 +231,9 @@ $form.Add_Shown({
     $dlg2 = New-Object System.Windows.Forms.FolderBrowserDialog
     $dlg2.Description = "Choisissez le dossier d'installation d'AC EVO"
     $dlg2.SelectedPath = $defaultAcEvo
+
     if ($dlg2.ShowDialog() -ne "OK") { $form.Close(); return }
+
     $AcEvoPath = $dlg2.SelectedPath
     $AgentPath = "$AcEvoPath\pitlane-agent"
     Add-Log "Dossier AC EVO : $AcEvoPath"
@@ -215,33 +252,44 @@ $form.Add_Shown({
     $credForm.MaximizeBox = $false
 
     $noteLbl = New-Object System.Windows.Forms.Label
-    $noteLbl.Text = "Ces identifiants sont utilisés une seule fois et ne sont jamais stockés."
+    $noteLbl.Text = "Ces identifiants sont utilises une seule fois et ne sont jamais stockes."
     $noteLbl.Location = New-Object System.Drawing.Point(12, 12)
     $noteLbl.Size = New-Object System.Drawing.Size(365, 32)
     $noteLbl.ForeColor = [System.Drawing.Color]::FromArgb(240, 165, 0)
     $credForm.Controls.Add($noteLbl)
 
-    foreach ($row in @(
-        @{ Label="Nom d'utilisateur Steam :"; Y=54;  PassChar=[char]0 },
-        @{ Label="Mot de passe Steam :";       Y=100; PassChar='*'    }
-    )) {
-        $lbl = New-Object System.Windows.Forms.Label
-        $lbl.Text = $row.Label; $lbl.Location = New-Object System.Drawing.Point(12, $row.Y)
-        $lbl.Size = New-Object System.Drawing.Size(170, 20)
-        $credForm.Controls.Add($lbl)
-        $txt = New-Object System.Windows.Forms.TextBox
-        $txt.Location = New-Object System.Drawing.Point(185, ($row.Y - 2))
-        $txt.Size = New-Object System.Drawing.Size(185, 22)
-        $txt.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
-        $txt.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
-        $txt.BorderStyle = "FixedSingle"
-        if ($row.PassChar -ne [char]0) { $txt.PasswordChar = $row.PassChar }
-        $credForm.Controls.Add($txt)
-        if ($row.Y -eq 54)  { $userTxt = $txt } else { $passTxt = $txt }
-    }
+    $userLbl = New-Object System.Windows.Forms.Label
+    $userLbl.Text = "Nom d'utilisateur Steam :"
+    $userLbl.Location = New-Object System.Drawing.Point(12, 54)
+    $userLbl.Size = New-Object System.Drawing.Size(170, 20)
+    $credForm.Controls.Add($userLbl)
+
+    $userTxt = New-Object System.Windows.Forms.TextBox
+    $userTxt.Location = New-Object System.Drawing.Point(185, 52)
+    $userTxt.Size = New-Object System.Drawing.Size(185, 22)
+    $userTxt.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
+    $userTxt.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+    $userTxt.BorderStyle = "FixedSingle"
+    $credForm.Controls.Add($userTxt)
+
+    $passLbl = New-Object System.Windows.Forms.Label
+    $passLbl.Text = "Mot de passe Steam :"
+    $passLbl.Location = New-Object System.Drawing.Point(12, 100)
+    $passLbl.Size = New-Object System.Drawing.Size(170, 20)
+    $credForm.Controls.Add($passLbl)
+
+    $passTxt = New-Object System.Windows.Forms.TextBox
+    $passTxt.Location = New-Object System.Drawing.Point(185, 98)
+    $passTxt.Size = New-Object System.Drawing.Size(185, 22)
+    $passTxt.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
+    $passTxt.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+    $passTxt.BorderStyle = "FixedSingle"
+    $passTxt.PasswordChar = '*'
+    $credForm.Controls.Add($passTxt)
 
     $okBtn = New-Object System.Windows.Forms.Button
-    $okBtn.Text = "Continuer"; $okBtn.DialogResult = "OK"
+    $okBtn.Text = "Continuer"
+    $okBtn.DialogResult = "OK"
     $okBtn.Location = New-Object System.Drawing.Point(270, 148)
     $okBtn.Size = New-Object System.Drawing.Size(100, 28)
     $okBtn.BackColor = [System.Drawing.Color]::FromArgb(0, 255, 136)
@@ -251,45 +299,70 @@ $form.Add_Shown({
     $credForm.AcceptButton = $okBtn
 
     if ($credForm.ShowDialog() -ne "OK") { $form.Close(); return }
+
     $steamUser = $userTxt.Text
     $steamPass = $passTxt.Text
-    $passTxt.Text = "" # effacer de la mémoire du contrôle
+    $passTxt.Text = ""
     Add-Log "Credentials saisis"
     Set-StepStatus 3 "ok"
 
-    # [5] Téléchargement AC EVO via steamcmd
+    # [5] Telechargement AC EVO via steamcmd
     Set-StepStatus 4 "running"
-    Add-Log "Lancement steamcmd +app_update 4564210 validate…"
+    Add-Log "Lancement steamcmd +app_update 4564210 validate"
+
     $steamArgs = "+force_install_dir `"$AcEvoPath`" +login `"$steamUser`" `"$steamPass`" +app_update 4564210 validate +quit"
-    $steamUser = $null; $steamPass = $null  # effacer les credentials
+    $steamUser = $null
+    $steamPass = $null
+
     $psi = New-Object System.Diagnostics.ProcessStartInfo
     $psi.FileName = $SteamCmdExe
     $psi.Arguments = $steamArgs
     $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError  = $true
+    $psi.RedirectStandardError = $true
     $psi.UseShellExecute = $false
-    $psi.CreateNoWindow  = $true
-    $proc = [System.Diagnostics.Process]::Start($psi)
+    $psi.CreateNoWindow = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+
+    $outputHandler = [System.Diagnostics.DataReceivedEventHandler]{
+        param($sender, $eventArgs)
+        if ($eventArgs.Data) { Add-Log $eventArgs.Data }
+    }
+
+    $errorHandler = [System.Diagnostics.DataReceivedEventHandler]{
+        param($sender, $eventArgs)
+        if ($eventArgs.Data) { Add-Log $eventArgs.Data }
+    }
+
+    $proc.add_OutputDataReceived($outputHandler)
+    $proc.add_ErrorDataReceived($errorHandler)
+    [void]$proc.Start()
     $proc.BeginOutputReadLine()
-    $proc.OutputDataReceived.Add({ param($s,$e); if ($e.Data) { Add-Log $e.Data } })
+    $proc.BeginErrorReadLine()
+
     while (-not $proc.HasExited) {
         [System.Windows.Forms.Application]::DoEvents()
         Start-Sleep -Milliseconds 200
     }
+
+    $proc.WaitForExit()
+
     if (-not (Test-Path "$AcEvoPath\AssettoCorsaEVOServer.exe")) {
         Set-StepStatus 4 "error"
         [System.Windows.Forms.MessageBox]::Show(
-            "Échec du téléchargement. Vérifiez vos credentials Steam.", "Erreur", "OK", "Error")
+            "Echec du telechargement. Verifiez vos credentials Steam.", "Erreur", "OK", "Error")
         return
     }
-    Add-Log "AC EVO téléchargé"
+
+    Add-Log "AC EVO telecharge"
     Set-StepStatus 4 "ok"
 
     # [6] Installation agent
     Set-StepStatus 5 "running"
     try {
         Download-Agent -DestinationPath $AgentPath
-        Add-Log "Agent installé : $AgentPath"
+        Add-Log "Agent installe : $AgentPath"
         Set-StepStatus 5 "ok"
     } catch {
         Set-StepStatus 5 "error"
@@ -297,99 +370,125 @@ $form.Add_Shown({
         return
     }
 
-    # [7] Vérification Python
+    # [7] Verification Python
     Set-StepStatus 6 "running"
     $python = Get-Command python -ErrorAction SilentlyContinue
+
     if (-not $python) {
-        Add-Log "Python absent — installation via winget…"
+        Add-Log "Python absent - installation via winget"
         winget install Python.Python.3 --silent --accept-package-agreements --accept-source-agreements | Out-Null
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" +
-                    [System.Environment]::GetEnvironmentVariable("Path","User")
-    } else { Add-Log "Python trouvé : $($python.Source)" }
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
+            [System.Environment]::GetEnvironmentVariable("Path", "User")
+    } else {
+        Add-Log "Python trouve : $($python.Source)"
+    }
+
     Set-StepStatus 6 "ok"
 
-    # [8] Installation dépendances
+    # [8] Installation dependances
     Set-StepStatus 7 "running"
-    Add-Log "pip install requirements…"
+    Add-Log "pip install requirements"
     $pipOut = & python -m pip install -r "$AgentPath\requirements.txt" --quiet 2>&1
     Add-Log ($pipOut | Out-String).Trim()
     Set-StepStatus 7 "ok"
 
-    # [9] Génération config.yml
+    # [9] Generation config.yml
     Set-StepStatus 8 "running"
     $JwtSecret = New-JwtSecret
+    $publicIp = Get-PublicIp
+    $BaseUrl = "http://$publicIp"
+    $AgentUrl = "http://$publicIp`:8181"
     $AppManifestPath = Get-AppManifestPath $SteamCmdExe
-    $configContent = Get-Content "$AgentPath\config.example.yml" -Raw
-    $configContent = $configContent -replace 'INSTALL_PATH',     $AcEvoPath
-    $configContent = $configContent -replace 'CONFIGS_PATH',     "$AcEvoPath\configs"
-    $configContent = $configContent -replace 'RESULTS_PATH',     "$AcEvoPath\Results"
-    $configContent = $configContent -replace 'LOGS_PATH',        "$AcEvoPath\logs"
-    $configContent = $configContent -replace 'STEAMCMD_PATH',    ($SteamCmdExe -replace '\\', '\\\\')
-    $configContent = $configContent -replace 'APPMANIFEST_PATH', ($AppManifestPath -replace '\\', '\\\\')
-    $configContent = $configContent -replace 'CHANGE_ME_SAME_AS_APP_SECRET_SYMFONY', $JwtSecret
-    Set-Content -Path "$AgentPath\config.yml" -Value $configContent -Encoding UTF8
+
+    $configContent = Get-Content "$AgentPath/config.template.yml" -Raw
+    $configContent = $configContent.Replace("__BASE_URL__", $BaseUrl)
+    $configContent = $configContent.Replace("__INSTALL_PATH__", $AcEvoPath)
+    $configContent = $configContent.Replace("__CONFIGS_PATH__", "$AcEvoPath/configs")
+    $configContent = $configContent.Replace("__RESULTS_PATH__", "$AcEvoPath/Results")
+    $configContent = $configContent.Replace("__LOGS_PATH__", "$AcEvoPath/logs")
+    $configContent = $configContent.Replace("__STEAMCMD_PATH__", $SteamCmdExe)
+    $configContent = $configContent.Replace("__APPMANIFEST_PATH__", $AppManifestPath)
+    $configContent = $configContent.Replace("__JWT_SECRET__", $JwtSecret)
+    Set-Content -Path "$AgentPath/config.yml" -Value $configContent -Encoding UTF8
+    Remove-Item "$AgentPath/config.template.yml" -Force -ErrorAction SilentlyContinue
+
     foreach ($dir in @("$AcEvoPath\configs", "$AcEvoPath\Results", "$AcEvoPath\logs")) {
-        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
+        if (-not (Test-Path $dir)) {
+            New-Item -ItemType Directory -Path $dir | Out-Null
+        }
     }
-    Add-Log "config.yml généré"
+
+    Add-Log "config.yml genere"
+    Add-Log "config.template.yml supprime"
     Set-StepStatus 8 "ok"
 
-    # [10] Tâche planifiée
+    # [10] Tache planifiee
     Set-StepStatus 9 "running"
     Unregister-ScheduledTask -TaskName "PitLaneAgent" -Confirm:$false -ErrorAction SilentlyContinue
-    $action    = New-ScheduledTaskAction -Execute "python" `
-                     -Argument "`"$AgentPath\app.py`"" -WorkingDirectory $AgentPath
-    $trigger   = New-ScheduledTaskTrigger -AtStartup
-    $settings  = New-ScheduledTaskSettingsSet -RestartCount 3 `
-                     -RestartInterval (New-TimeSpan -Minutes 1)
+
+    $action = New-ScheduledTaskAction -Execute "python" `
+        -Argument "`"$AgentPath\app.py`"" -WorkingDirectory $AgentPath
+    $trigger = New-ScheduledTaskTrigger -AtStartup
+    $settings = New-ScheduledTaskSettingsSet -RestartCount 3 `
+        -RestartInterval (New-TimeSpan -Minutes 1)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
+
     Register-ScheduledTask -TaskName "PitLaneAgent" -Action $action `
         -Trigger $trigger -Settings $settings -Principal $principal | Out-Null
-    Add-Log "Tâche planifiée PitLaneAgent créée"
+
+    Start-ScheduledTask -TaskName "PitLaneAgent"
+
+    Add-Log "Tache planifiee PitLaneAgent creee"
+    Add-Log "Agent PitLane demarre"
     Set-StepStatus 9 "ok"
 
-    # [11] Règles firewall
+    # [11] Regles firewall
     Set-StepStatus 10 "running"
+
+    Get-NetFirewallRule -DisplayName "PitLane -*" -ErrorAction SilentlyContinue |
+        Remove-NetFirewallRule -ErrorAction SilentlyContinue
+
     @(
-        @{ Name="PitLane Agent";      Port=8181; Proto="TCP" },
-        @{ Name="PitLane Server TCP"; Port=9700; Proto="TCP" },
-        @{ Name="PitLane Server UDP"; Port=9700; Proto="UDP" },
-        @{ Name="PitLane HTTP";       Port=8081; Proto="TCP" }
+        @{ Name = "PitLane - Agent API 8181"; Port = 8181; Proto = "TCP" },
+        @{ Name = "PitLane - AC EVO server1 TCP 9700"; Port = 9700; Proto = "TCP" },
+        @{ Name = "PitLane - AC EVO server1 UDP 9700"; Port = 9700; Proto = "UDP" },
+        @{ Name = "PitLane - AC EVO server1 HTTP 8081"; Port = 8081; Proto = "TCP" }
     ) | ForEach-Object {
         New-NetFirewallRule -DisplayName $_.Name -Direction Inbound `
             -Protocol $_.Proto -LocalPort $_.Port -Action Allow `
             -ErrorAction SilentlyContinue | Out-Null
-        Add-Log "Firewall : $($_.Proto)/$($_.Port) ouvert"
+        Add-Log "Firewall : $($_.Proto)/$($_.Port) ouvert ($($_.Name))"
     }
+
     Set-StepStatus 10 "ok"
 
-    # [12] Résumé
+    # [12] Resume
     Set-StepStatus 11 "ok"
-    $publicIp = Get-PublicIp
-
-    $form.Size = New-Object System.Drawing.Size(680, 730)
 
     $summaryBox = New-Object System.Windows.Forms.Panel
-    $summaryBox.Location = New-Object System.Drawing.Point(20, 575)
+    $summaryBox.Location = New-Object System.Drawing.Point(20, 635)
     $summaryBox.Size = New-Object System.Drawing.Size(630, 72)
     $summaryBox.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
     $summaryBox.BorderStyle = "FixedSingle"
     $form.Controls.Add($summaryBox)
 
     foreach ($row in @(
-        @{ Label="IP publique : $publicIp"; CopyText=$publicIp;  BtnText="Copier IP";  Y=8  },
-        @{ Label="JWT Secret : $($JwtSecret.Substring(0,20))…"; CopyText=$JwtSecret; BtnText="Copier JWT"; Y=38 }
+        @{ Label = "Agent URL : $AgentUrl"; CopyText = $AgentUrl; BtnText = "Copier URL"; Y = 8 },
+        @{ Label = "JWT Secret : $($JwtSecret.Substring(0,20))..."; CopyText = $JwtSecret; BtnText = "Copier JWT"; Y = 38 }
     )) {
         $lbl = New-Object System.Windows.Forms.Label
-        $lbl.Text = $row.Label; $lbl.Location = New-Object System.Drawing.Point(10, $row.Y)
+        $lbl.Text = $row.Label
+        $lbl.Location = New-Object System.Drawing.Point(10, $row.Y)
         $lbl.Size = New-Object System.Drawing.Size(440, 20)
         $lbl.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
         $summaryBox.Controls.Add($lbl)
 
         $ct = $row.CopyText
         $btn = New-Object System.Windows.Forms.Button
-        $btn.Text = $row.BtnText; $btn.Location = New-Object System.Drawing.Point(460, ($row.Y - 2))
-        $btn.Size = New-Object System.Drawing.Size(110, 24); $btn.FlatStyle = "Flat"
+        $btn.Text = $row.BtnText
+        $btn.Location = New-Object System.Drawing.Point(460, ($row.Y - 2))
+        $btn.Size = New-Object System.Drawing.Size(110, 24)
+        $btn.FlatStyle = "Flat"
         $btn.BackColor = [System.Drawing.Color]::FromArgb(48, 54, 61)
         $btn.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
         $btn.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($ct) }.GetNewClosure())
@@ -398,12 +497,12 @@ $form.Add_Shown({
 
     $msgLbl = New-Object System.Windows.Forms.Label
     $msgLbl.Text = "Rends-toi dans le hub PitLane pour ajouter ce serveur."
-    $msgLbl.Location = New-Object System.Drawing.Point(20, 658)
+    $msgLbl.Location = New-Object System.Drawing.Point(20, 718)
     $msgLbl.Size = New-Object System.Drawing.Size(490, 20)
     $msgLbl.ForeColor = [System.Drawing.Color]::FromArgb(139, 148, 158)
     $form.Controls.Add($msgLbl)
 
-    $closeBtn.Location = New-Object System.Drawing.Point(540, 655)
+    $closeBtn.Location = New-Object System.Drawing.Point(540, 715)
     $closeBtn.Visible = $true
     [System.Windows.Forms.Application]::DoEvents()
 })

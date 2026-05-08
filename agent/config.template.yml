@@ -1,7 +1,7 @@
 ####################################################################
-# PitLane Agent — Configuration
-# Ce fichier est utilisé comme template par les installers
-# Les chemins sont remplis automatiquement à l'installation
+# PitLane Agent - Configuration template
+# This file is used by the installers to generate config.yml
+# It is removed after installation.
 ####################################################################
 
 http:
