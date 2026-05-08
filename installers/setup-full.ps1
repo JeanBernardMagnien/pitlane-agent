@@ -392,23 +392,21 @@ $form.Add_Shown({
 
     $proc.WaitForExit()
 
-    if ($proc.ExitCode -ne 0) {
-        Set-StepStatus 4 "error"
-        [System.Windows.Forms.MessageBox]::Show(
-            "SteamCMD a echoue avec le code $($proc.ExitCode). Verifie les credentials Steam ou Steam Guard.",
-            "Erreur SteamCMD", "OK", "Error"
-        )
-        return
-    }
-
-    # Resolution dynamique du dossier AC EVO depuis SteamCMD
-    Add-Log "Recherche du dossier AC EVO installe..."
+    # Chercher d'abord dans SteamCMD (cas nominal)
     $AcEvoPath = Find-AcEvoServer -SearchRoot $SteamCmdDir
+
+    # Si pas trouvé, fallback recherche globale (cas Steam client ou install ailleurs)
+    if (-not $AcEvoPath) {
+        Add-Log "AC EVO non trouve dans SteamCMD, recherche globale..."
+        $AcEvoPath = Find-AcEvoServer -SearchRoot $null
+    }
 
     if (-not $AcEvoPath) {
         Set-StepStatus 4 "error"
         [System.Windows.Forms.MessageBox]::Show(
-            "Dossier AC EVO introuvable apres telechargement.", "Erreur", "OK", "Error")
+            "SteamCMD a echoue (code $($proc.ExitCode)). Verifie les credentials Steam ou Steam Guard.",
+            "Erreur SteamCMD", "OK", "Error"
+        )
         return
     }
 

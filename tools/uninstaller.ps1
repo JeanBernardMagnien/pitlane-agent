@@ -10,17 +10,30 @@ $ErrorActionPreference = "Continue"
 function Find-AcEvoServer {
     param([System.Windows.Forms.TextBox]$LogBox)
 
-    $drives = (Get-PSDrive -PSProvider FileSystem).Root
+    # Chercher d'abord dans les chemins connus pour eviter un scan global lent
+    $knownPaths = @(
+        "C:\SteamCMD\steamapps\common",
+        "D:\SteamCMD\steamapps\common",
+        "C:\steamcmd\steamapps\common",
+        "D:\steamcmd\steamapps\common"
+    )
 
+    foreach ($path in $knownPaths) {
+        if (-not (Test-Path $path)) { continue }
+        $found = Get-ChildItem -Path $path -Filter "AssettoCorsaEVOServer.exe" `
+            -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { return $found.DirectoryName }
+    }
+
+    # Fallback scan global
+    $drives = (Get-PSDrive -PSProvider FileSystem).Root
     foreach ($drive in $drives) {
         Add-LogSafe -LogBox $LogBox -Message "Recherche AC EVO sur $drive ..."
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
             -Recurse -Depth 6 -ErrorAction SilentlyContinue |
             Select-Object -First 1
-
-        if ($found) {
-            return $found.DirectoryName
-        }
+        if ($found) { return $found.DirectoryName }
     }
 
     return $null
@@ -29,17 +42,26 @@ function Find-AcEvoServer {
 function Find-SteamCmd {
     param([System.Windows.Forms.TextBox]$LogBox)
 
-    $drives = (Get-PSDrive -PSProvider FileSystem).Root
+    # Chercher d'abord dans les chemins connus
+    $knownPaths = @(
+        "C:\SteamCMD\steamcmd.exe",
+        "D:\SteamCMD\steamcmd.exe",
+        "C:\steamcmd\steamcmd.exe",
+        "D:\steamcmd\steamcmd.exe"
+    )
 
+    foreach ($path in $knownPaths) {
+        if (Test-Path $path) { return $path }
+    }
+
+    # Fallback scan global
+    $drives = (Get-PSDrive -PSProvider FileSystem).Root
     foreach ($drive in $drives) {
         Add-LogSafe -LogBox $LogBox -Message "Recherche steamcmd.exe sur $drive ..."
         $found = Get-ChildItem -Path $drive -Filter "steamcmd.exe" `
             -Recurse -Depth 4 -ErrorAction SilentlyContinue |
             Select-Object -First 1
-
-        if ($found) {
-            return $found.FullName
-        }
+        if ($found) { return $found.FullName }
     }
 
     return $null
@@ -78,7 +100,17 @@ function Remove-PathSafe {
             Add-LogSafe -LogBox $LogBox -Message "[DRY RUN] Supprimerait : $Path"
         } else {
             Add-LogSafe -LogBox $LogBox -Message "Suppression : $Path"
-            Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+            try {
+                Remove-Item -Path $Path -Recurse -Force -ErrorAction Stop
+            } catch {
+                Add-LogSafe -LogBox $LogBox -Message "Remove-Item echoue, tentative via cmd rmdir..."
+                & cmd /c rmdir /s /q `"$Path`"
+                if (Test-Path $Path) {
+                    Add-LogSafe -LogBox $LogBox -Message "ERREUR : impossible de supprimer $Path (fichiers verrouilles ?)"
+                } else {
+                    Add-LogSafe -LogBox $LogBox -Message "Suppression reussie via cmd : $Path"
+                }
+            }
         }
     } else {
         Add-LogSafe -LogBox $LogBox -Message "Introuvable : $Path"
@@ -295,7 +327,7 @@ $runBtn.Add_Click({
         Add-Log "=== PitLane uninstaller / reset tool ==="
         if ($dryRun) { Add-Log "Mode DRY RUN actif." }
 
-        # [1] Stop agent
+        # [1] Stop agent + process steamcmd pour liberer les locks
         Set-StepStatus 0 "running"
         if (-not $dryRun) {
             Stop-ScheduledTask -TaskName "PitLaneAgent" -ErrorAction SilentlyContinue
@@ -303,6 +335,7 @@ $runBtn.Add_Click({
             Add-Log "[DRY RUN] Stopperait la tache PitLaneAgent"
         }
 
+        # Process Python lies a PitLane
         Get-CimInstance Win32_Process -Filter "name = 'python.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
             $_.CommandLine -like "*pitlane-agent*" -or
@@ -316,6 +349,23 @@ $runBtn.Add_Click({
                 Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
             }
         }
+
+        # Process SteamCMD qui pourraient tenir des locks
+        Get-Process -Name "steamcmd" -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($dryRun) {
+                Add-Log "[DRY RUN] Stopperait process steamcmd PID $($_.Id)"
+            } else {
+                Add-Log "Stop process steamcmd PID $($_.Id)"
+                Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
+            }
+        }
+
+        # Pause pour laisser les handles se liberer
+        if (-not $dryRun) {
+            Add-Log "Attente liberation des handles..."
+            Start-Sleep -Seconds 2
+        }
+
         Set-StepStatus 0 "ok"
 
         # [2] Scheduled task
@@ -354,8 +404,8 @@ $runBtn.Add_Click({
         Set-StepStatus 3 "running"
         $AcEvoPath = Find-AcEvoServer -LogBox $logBox
         $SteamCmdExe = Find-SteamCmd -LogBox $logBox
-        Add-Log "AC EVO   : $AcEvoPath"
-        Add-Log "SteamCMD : $SteamCmdExe"
+        Add-Log "AC EVO   : $(if ($AcEvoPath) { $AcEvoPath } else { 'introuvable' })"
+        Add-Log "SteamCMD : $(if ($SteamCmdExe) { $SteamCmdExe } else { 'introuvable' })"
         Set-StepStatus 3 "ok"
 
         # [5] Backup configs and cleanup generated files
@@ -403,6 +453,8 @@ $runBtn.Add_Click({
             if ($AcEvoPath) {
                 if (Is-UnsafeRootPath $AcEvoPath) {
                     Add-Log "SECURITE : refus de supprimer une racine de disque : $AcEvoPath"
+                } elseif (-not (Test-Path $AcEvoPath)) {
+                    Add-Log "AC EVO deja supprime avec SteamCMD."
                 } else {
                     Remove-PathSafe -Path $AcEvoPath -DryRun $dryRun -LogBox $logBox
                 }
