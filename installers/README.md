@@ -6,8 +6,8 @@ Ce dossier contient les scripts PowerShell permettant d'installer PitLane Agent 
 
 | Script            | Usage                                                                                            |
 | ----------------- | ------------------------------------------------------------------------------------------------ |
-| `setup-agent.ps1` | Installer uniquement l'agent PitLane sur un serveur ou AC EVO Dedicated Server est deja installe |
-| `setup-full.ps1`  | Installer SteamCMD, AC EVO Dedicated Server et PitLane Agent sur un serveur vierge               |
+| `setup-agent`     | Installer uniquement l'agent PitLane sur un serveur ou AC EVO Dedicated Server est deja installe |
+| `setup-full`      | Installer SteamCMD, AC EVO Dedicated Server et PitLane Agent sur un serveur vierge               |
 
 ---
 
@@ -25,19 +25,39 @@ Les fichiers seront telecharges dans le dossier Windows :
 
 ## Telecharger `setup-agent.ps1`
 
+Le .exe : 
+
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.ps1" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-agent.ps1"
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
+```
+
+ou ps1 :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
 ```
 
 ---
 
 ## Telecharger `setup-full.ps1`
 
+Le .exe : 
+
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.ps1" `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-full.ps1"
+```
+
+ou ps1 :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
   -OutFile "$env:USERPROFILE\Downloads\setup-full.ps1"
 ```
 
