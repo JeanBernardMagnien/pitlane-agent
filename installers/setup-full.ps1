@@ -6,6 +6,20 @@ Add-Type -AssemblyName System.Drawing
 # Utility functions
 
 function Find-AcEvoServer {
+    param([string]$SearchRoot)
+
+    $root = if ($SearchRoot) { $SearchRoot } else { $null }
+
+    if ($root) {
+        $found = Get-ChildItem -Path $root -Filter "AssettoCorsaEVOServer.exe" `
+            -Recurse -Depth 6 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($found) { return $found.DirectoryName }
+        return $null
+    }
+
+    # Recherche globale sur tous les disques
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
     foreach ($drive in $drives) {
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
@@ -14,14 +28,52 @@ function Find-AcEvoServer {
 
         if ($found) { return $found.DirectoryName }
     }
+
     return $null
 }
 
 function Get-AppManifestPath {
-    param($SteamCmdExePath)
+    param([string]$SteamCmdDir)
+    return Join-Path $SteamCmdDir "steamapps\appmanifest_4564210.acf"
+}
 
-    $steamapps = Join-Path (Split-Path $SteamCmdExePath) "steamapps"
-    return "$steamapps\appmanifest_4564210.acf"
+function Find-SteamCmd {
+    Add-Log "Recherche steamcmd.exe dans les chemins connus..."
+
+    $knownPaths = @(
+        "C:\SteamCMD\steamcmd.exe",
+        "D:\SteamCMD\steamcmd.exe",
+        "C:\steamcmd\steamcmd.exe",
+        "D:\steamcmd\steamcmd.exe"
+    )
+
+    foreach ($path in $knownPaths) {
+        if (Test-Path $path) {
+            Add-Log "steamcmd.exe trouve : $path"
+            return $path
+        }
+    }
+
+    Add-Log "steamcmd.exe non trouve dans les chemins connus."
+    Add-Log "Recherche sur les disques, cela peut prendre quelques secondes..."
+
+    $drives = (Get-PSDrive -PSProvider FileSystem).Root
+
+    foreach ($drive in $drives) {
+        Add-Log "Recherche steamcmd.exe sur $drive ..."
+
+        $found = Get-ChildItem -Path $drive -Filter "steamcmd.exe" `
+            -Recurse -Depth 4 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($found) {
+            Add-Log "steamcmd.exe trouve : $($found.FullName)"
+            return $found.FullName
+        }
+    }
+
+    Add-Log "Aucun steamcmd.exe trouve."
+    return $null
 }
 
 function Download-Agent {
@@ -73,17 +125,6 @@ function Add-LogSafe {
     [System.Windows.Forms.Application]::DoEvents()
 }
 
-# Pre-check
-
-$existing = Find-AcEvoServer
-if ($existing) {
-    [System.Windows.Forms.MessageBox]::Show(
-        "AC EVO Dedicated Server deja detecte ($existing).`nLance setup-agent.ps1 pour installer uniquement l'agent.",
-        "Erreur", "OK", "Error"
-    )
-    exit 1
-}
-
 # Main UI
 
 $form = New-Object System.Windows.Forms.Form
@@ -112,9 +153,9 @@ $stepsPanel.BorderStyle = "FixedSingle"
 $form.Controls.Add($stepsPanel)
 
 $steps = @(
-    "[1] Choix dossier steamcmd",
-    "[2] Telechargement steamcmd",
-    "[3] Choix dossier AC EVO",
+    "[1] Detection SteamCMD",
+    "[2] Installation SteamCMD si absent",
+    "[3] Dossier AC EVO",
     "[4] Saisie credentials Steam",
     "[5] Telechargement AC EVO",
     "[6] Installation agent",
@@ -192,51 +233,69 @@ $form.Controls.Add($closeBtn)
 $form.Add_Shown({
     $form.Activate()
 
-    # [1] Choix dossier steamcmd
-    Set-StepStatus 0 "running"
-    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dlg.Description = "Choisissez le dossier d'installation de steamcmd (ex: C:\SteamCMD)"
-    $dlg.SelectedPath = "C:\SteamCMD"
+    # [0] Pre-check AC EVO
+    Add-Log "Verification presence AC EVO..."
+    $existing = Find-AcEvoServer
 
-    if ($dlg.ShowDialog() -ne "OK") { $form.Close(); return }
-
-    $SteamCmdDir = $dlg.SelectedPath
-    $SteamCmdExe = "$SteamCmdDir\steamcmd.exe"
-    Add-Log "Dossier steamcmd : $SteamCmdDir"
-    Set-StepStatus 0 "ok"
-
-    # [2] Telechargement steamcmd
-    Set-StepStatus 1 "running"
-    try {
-        Add-Log "Telechargement steamcmd"
-        New-Item -ItemType Directory -Path $SteamCmdDir -Force | Out-Null
-        $zip = "$env:TEMP\steamcmd.zip"
-
-        Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" `
-            -OutFile $zip -UseBasicParsing
-        Expand-Archive -Path $zip -DestinationPath $SteamCmdDir -Force
-        Remove-Item $zip -Force -ErrorAction SilentlyContinue
-
-        Add-Log "steamcmd extrait : $SteamCmdExe"
-        Set-StepStatus 1 "ok"
-    } catch {
-        Set-StepStatus 1 "error"
-        [System.Windows.Forms.MessageBox]::Show("Erreur steamcmd : $_", "Erreur", "OK", "Error")
+    if ($existing) {
+        Set-StepStatus 0 "error"
+        [System.Windows.Forms.MessageBox]::Show(
+            "AC EVO Dedicated Server deja detecte ($existing).`nLance setup-agent.ps1 pour installer uniquement l'agent.",
+            "Erreur", "OK", "Error"
+        )
         return
     }
 
-    # [3] Choix dossier AC EVO
+    Add-Log "AC EVO absent, installation complete possible."
+
+    # [1] Detection SteamCMD
+    Set-StepStatus 0 "running"
+    $SteamCmdExe = Find-SteamCmd
+
+    if ($SteamCmdExe) {
+        $SteamCmdDir = Split-Path $SteamCmdExe
+        Add-Log "SteamCMD reutilise : $SteamCmdExe"
+        Set-StepStatus 0 "ok"
+        Set-StepStatus 1 "skip"
+    } else {
+        Add-Log "steamcmd.exe absent - installation automatique requise"
+        Set-StepStatus 0 "ok"
+
+        # [2] Installation SteamCMD si absent
+        Set-StepStatus 1 "running"
+        $SteamCmdDir = "C:\SteamCMD"
+        $SteamCmdExe = Join-Path $SteamCmdDir "steamcmd.exe"
+
+        try {
+            Add-Log "Installation steamcmd dans $SteamCmdDir"
+            New-Item -ItemType Directory -Path $SteamCmdDir -Force | Out-Null
+            $zip = "$env:TEMP\steamcmd.zip"
+
+            Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" `
+                -OutFile $zip -UseBasicParsing
+
+            Expand-Archive -Path $zip -DestinationPath $SteamCmdDir -Force
+            Remove-Item $zip -Force -ErrorAction SilentlyContinue
+
+            if (-not (Test-Path $SteamCmdExe)) {
+                throw "steamcmd.exe introuvable apres extraction : $SteamCmdExe"
+            }
+
+            Add-Log "steamcmd installe : $SteamCmdExe"
+            Set-StepStatus 1 "ok"
+        } catch {
+            Set-StepStatus 1 "error"
+            [System.Windows.Forms.MessageBox]::Show(
+                "Erreur installation steamcmd : $_",
+                "Erreur", "OK", "Error"
+            )
+            return
+        }
+    }
+
+    # [3] Dossier AC EVO - sera resolu dynamiquement apres telechargement
     Set-StepStatus 2 "running"
-    $defaultAcEvo = "$SteamCmdDir\steamapps\common\Assetto Corsa EVO Dedicated Server"
-    $dlg2 = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dlg2.Description = "Choisissez le dossier d'installation d'AC EVO"
-    $dlg2.SelectedPath = $defaultAcEvo
-
-    if ($dlg2.ShowDialog() -ne "OK") { $form.Close(); return }
-
-    $AcEvoPath = $dlg2.SelectedPath
-    $AgentPath = "$AcEvoPath\pitlane-agent"
-    Add-Log "Dossier AC EVO : $AcEvoPath"
+    Add-Log "Dossier AC EVO sera resolu apres telechargement SteamCMD."
     Set-StepStatus 2 "ok"
 
     # [4] Saisie credentials Steam
@@ -309,53 +368,52 @@ $form.Add_Shown({
     # [5] Telechargement AC EVO via steamcmd
     Set-StepStatus 4 "running"
     Add-Log "Lancement steamcmd +app_update 4564210 validate"
+    Add-Log "Une fenetre SteamCMD va s'ouvrir - validez le Steam Guard sur votre telephone si demande, puis attendez la fin du telechargement."
 
-    $steamArgs = "+force_install_dir `"$AcEvoPath`" +login `"$steamUser`" `"$steamPass`" +app_update 4564210 validate +quit"
+    $steamArgs = "+login `"$steamUser`" `"$steamPass`" +app_update 4564210 validate +quit"
     $steamUser = $null
     $steamPass = $null
 
     $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $SteamCmdExe
-    $psi.Arguments = $steamArgs
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
+    $psi.FileName        = $SteamCmdExe
+    $psi.Arguments       = $steamArgs
+    $psi.UseShellExecute = $true   # fenetre visible = Steam Guard peut interagir
+    $psi.CreateNoWindow  = $false
 
     $proc = New-Object System.Diagnostics.Process
     $proc.StartInfo = $psi
-
-    $outputHandler = [System.Diagnostics.DataReceivedEventHandler]{
-        param($sender, $eventArgs)
-        if ($eventArgs.Data) { Add-Log $eventArgs.Data }
-    }
-
-    $errorHandler = [System.Diagnostics.DataReceivedEventHandler]{
-        param($sender, $eventArgs)
-        if ($eventArgs.Data) { Add-Log $eventArgs.Data }
-    }
-
-    $proc.add_OutputDataReceived($outputHandler)
-    $proc.add_ErrorDataReceived($errorHandler)
     [void]$proc.Start()
-    $proc.BeginOutputReadLine()
-    $proc.BeginErrorReadLine()
 
+    # Attendre la fin sans bloquer le form
     while (-not $proc.HasExited) {
         [System.Windows.Forms.Application]::DoEvents()
-        Start-Sleep -Milliseconds 200
+        Start-Sleep -Milliseconds 500
     }
 
     $proc.WaitForExit()
 
-    if (-not (Test-Path "$AcEvoPath\AssettoCorsaEVOServer.exe")) {
+    if ($proc.ExitCode -ne 0) {
         Set-StepStatus 4 "error"
         [System.Windows.Forms.MessageBox]::Show(
-            "Echec du telechargement. Verifiez vos credentials Steam.", "Erreur", "OK", "Error")
+            "SteamCMD a echoue avec le code $($proc.ExitCode). Verifie les credentials Steam ou Steam Guard.",
+            "Erreur SteamCMD", "OK", "Error"
+        )
         return
     }
 
-    Add-Log "AC EVO telecharge"
+    # Resolution dynamique du dossier AC EVO depuis SteamCMD
+    Add-Log "Recherche du dossier AC EVO installe..."
+    $AcEvoPath = Find-AcEvoServer -SearchRoot $SteamCmdDir
+
+    if (-not $AcEvoPath) {
+        Set-StepStatus 4 "error"
+        [System.Windows.Forms.MessageBox]::Show(
+            "Dossier AC EVO introuvable apres telechargement.", "Erreur", "OK", "Error")
+        return
+    }
+
+    $AgentPath = Join-Path $AcEvoPath "pitlane-agent"
+    Add-Log "Dossier AC EVO resolu : $AcEvoPath"
     Set-StepStatus 4 "ok"
 
     # [6] Installation agent
@@ -394,23 +452,23 @@ $form.Add_Shown({
 
     # [9] Generation config.yml
     Set-StepStatus 8 "running"
-    $JwtSecret = New-JwtSecret
-    $publicIp = Get-PublicIp
-    $BaseUrl = "http://$publicIp"
-    $AgentUrl = "http://$publicIp`:8181"
-    $AppManifestPath = Get-AppManifestPath $SteamCmdExe
+    $JwtSecret       = New-JwtSecret
+    $publicIp        = Get-PublicIp
+    $BaseUrl         = "http://$publicIp"
+    $AgentUrl        = "http://$publicIp`:8181"
+    $AppManifestPath = Get-AppManifestPath -SteamCmdDir $SteamCmdDir
 
-    $configContent = Get-Content "$AgentPath/config.template.yml" -Raw
-    $configContent = $configContent.Replace("__BASE_URL__", $BaseUrl)
-    $configContent = $configContent.Replace("__INSTALL_PATH__", $AcEvoPath)
-    $configContent = $configContent.Replace("__CONFIGS_PATH__", "$AcEvoPath/configs")
-    $configContent = $configContent.Replace("__RESULTS_PATH__", "$AcEvoPath/Results")
-    $configContent = $configContent.Replace("__LOGS_PATH__", "$AcEvoPath/logs")
-    $configContent = $configContent.Replace("__STEAMCMD_PATH__", $SteamCmdExe)
+    $configContent = Get-Content "$AgentPath\config.template.yml" -Raw
+    $configContent = $configContent.Replace("__BASE_URL__",         $BaseUrl)
+    $configContent = $configContent.Replace("__INSTALL_PATH__",     $AcEvoPath)
+    $configContent = $configContent.Replace("__CONFIGS_PATH__",     "$AcEvoPath\configs")
+    $configContent = $configContent.Replace("__RESULTS_PATH__",     "$AcEvoPath\Results")
+    $configContent = $configContent.Replace("__LOGS_PATH__",        "$AcEvoPath\logs")
+    $configContent = $configContent.Replace("__STEAMCMD_PATH__",    $SteamCmdExe)
     $configContent = $configContent.Replace("__APPMANIFEST_PATH__", $AppManifestPath)
-    $configContent = $configContent.Replace("__JWT_SECRET__", $JwtSecret)
-    Set-Content -Path "$AgentPath/config.yml" -Value $configContent -Encoding UTF8
-    Remove-Item "$AgentPath/config.template.yml" -Force -ErrorAction SilentlyContinue
+    $configContent = $configContent.Replace("__JWT_SECRET__",       $JwtSecret)
+    Set-Content -Path "$AgentPath\config.yml" -Value $configContent -Encoding UTF8
+    Remove-Item "$AgentPath\config.template.yml" -Force -ErrorAction SilentlyContinue
 
     foreach ($dir in @("$AcEvoPath\configs", "$AcEvoPath\Results", "$AcEvoPath\logs")) {
         if (-not (Test-Path $dir)) {
@@ -426,10 +484,10 @@ $form.Add_Shown({
     Set-StepStatus 9 "running"
     Unregister-ScheduledTask -TaskName "PitLaneAgent" -Confirm:$false -ErrorAction SilentlyContinue
 
-    $action = New-ScheduledTaskAction -Execute "python" `
+    $action    = New-ScheduledTaskAction -Execute "python" `
         -Argument "`"$AgentPath\app.py`"" -WorkingDirectory $AgentPath
-    $trigger = New-ScheduledTaskTrigger -AtStartup
-    $settings = New-ScheduledTaskSettingsSet -RestartCount 3 `
+    $trigger   = New-ScheduledTaskTrigger -AtStartup
+    $settings  = New-ScheduledTaskSettingsSet -RestartCount 3 `
         -RestartInterval (New-TimeSpan -Minutes 1)
     $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -RunLevel Highest
 
@@ -449,10 +507,10 @@ $form.Add_Shown({
         Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
     @(
-        @{ Name = "PitLane - Agent API 8181"; Port = 8181; Proto = "TCP" },
+        @{ Name = "PitLane - Agent API 8181";          Port = 8181; Proto = "TCP" },
         @{ Name = "PitLane - AC EVO server1 TCP 9700"; Port = 9700; Proto = "TCP" },
         @{ Name = "PitLane - AC EVO server1 UDP 9700"; Port = 9700; Proto = "UDP" },
-        @{ Name = "PitLane - AC EVO server1 HTTP 8081"; Port = 8081; Proto = "TCP" }
+        @{ Name = "PitLane - AC EVO server1 HTTP 8081";Port = 8081; Proto = "TCP" }
     ) | ForEach-Object {
         New-NetFirewallRule -DisplayName $_.Name -Direction Inbound `
             -Protocol $_.Proto -LocalPort $_.Port -Action Allow `

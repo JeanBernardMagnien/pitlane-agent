@@ -66,6 +66,13 @@ function Remove-PathSafe {
 
     if (-not $Path) { return }
 
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+
+    if ($fullPath -match '^[A-Z]:\\$') {
+        Add-LogSafe -LogBox $LogBox -Message "SECURITE : refus de supprimer une racine de disque : $fullPath"
+        return
+    }
+
     if (Test-Path $Path) {
         if ($DryRun) {
             Add-LogSafe -LogBox $LogBox -Message "[DRY RUN] Supprimerait : $Path"
@@ -235,6 +242,16 @@ function Add-Log {
     Add-LogSafe -LogBox $logBox -Message $msg
 }
 
+function Is-UnsafeRootPath {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $true }
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+
+    return $fullPath -match '^[A-Z]:\\$'
+}
+
 $runBtn = New-Object System.Windows.Forms.Button
 $runBtn.Text = "Run reset"
 $runBtn.Location = New-Object System.Drawing.Point(445, 695)
@@ -289,7 +306,6 @@ $runBtn.Add_Click({
         Get-CimInstance Win32_Process -Filter "name = 'python.exe'" -ErrorAction SilentlyContinue |
         Where-Object {
             $_.CommandLine -like "*pitlane-agent*" -or
-            $_.CommandLine -like "*pitlane-server-agent*" -or
             $_.CommandLine -like "*app.py*"
         } |
         ForEach-Object {
@@ -360,7 +376,6 @@ $runBtn.Add_Click({
         Set-StepStatus 5 "running"
         if ($AcEvoPath) {
             Remove-PathSafe -Path "$AcEvoPath\pitlane-agent" -DryRun $dryRun -LogBox $logBox
-            Remove-PathSafe -Path "$AcEvoPath\pitlane-server-agent" -DryRun $dryRun -LogBox $logBox
         } else {
             Add-Log "AC EVO introuvable, impossible de deduire le chemin de l'agent"
         }
@@ -372,17 +387,25 @@ $runBtn.Add_Click({
         if ($removeSteamCmd) {
             if ($SteamCmdExe) {
                 $SteamCmdDir = Split-Path $SteamCmdExe
-                Remove-PathSafe -Path $SteamCmdDir -DryRun $dryRun -LogBox $logBox
-            } else {
-                Add-Log "steamcmd.exe introuvable"
-            }
 
-            Remove-PathSafe -Path "C:\SteamCMD" -DryRun $dryRun -LogBox $logBox
+                if ($SteamCmdDir -match '^[A-Z]:\\$') {
+                    Add-Log "steamcmd.exe est a la racine ($SteamCmdExe). Suppression du fichier uniquement."
+                    Remove-PathSafe -Path $SteamCmdExe -DryRun $dryRun -LogBox $logBox
+                } else {
+                    Remove-PathSafe -Path $SteamCmdDir -DryRun $dryRun -LogBox $logBox
+                }
+            } else {
+                Add-Log "steamcmd.exe introuvable, aucune suppression SteamCMD"
+            }
         }
 
         if ($removeAcEvoServer) {
             if ($AcEvoPath) {
-                Remove-PathSafe -Path $AcEvoPath -DryRun $dryRun -LogBox $logBox
+                if (Is-UnsafeRootPath $AcEvoPath) {
+                    Add-Log "SECURITE : refus de supprimer une racine de disque : $AcEvoPath"
+                } else {
+                    Remove-PathSafe -Path $AcEvoPath -DryRun $dryRun -LogBox $logBox
+                }
             } else {
                 Add-Log "AC EVO introuvable"
             }

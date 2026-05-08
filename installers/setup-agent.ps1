@@ -18,6 +18,8 @@ function Find-AcEvoServer {
 }
 
 function Find-SteamRoot {
+    Add-Log "Recherche Steam client dans le registre..."
+
     $path = (Get-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Valve\Steam" `
         -ErrorAction SilentlyContinue).InstallPath
 
@@ -26,26 +28,78 @@ function Find-SteamRoot {
             -ErrorAction SilentlyContinue).InstallPath
     }
 
+    if ($path) {
+        Add-Log "Steam client trouve : $path"
+    } else {
+        Add-Log "Steam client non trouve."
+    }
+
     return $path
 }
 
 function Find-SteamCmd {
+    Add-Log "Recherche steamcmd.exe dans les chemins connus..."
+
+    $knownPaths = @(
+        "C:\SteamCMD\steamcmd.exe",
+        "D:\SteamCMD\steamcmd.exe",
+        "C:\steamcmd\steamcmd.exe",
+        "D:\steamcmd\steamcmd.exe"
+    )
+
+    foreach ($path in $knownPaths) {
+        if (Test-Path $path) {
+            Add-Log "steamcmd.exe trouve : $path"
+            return $path
+        }
+    }
+
+    Add-Log "steamcmd.exe non trouve dans les chemins connus."
+    Add-Log "Recherche sur les disques, cela peut prendre quelques secondes..."
+
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
+
     foreach ($drive in $drives) {
+        Add-Log "Recherche steamcmd.exe sur $drive ..."
+
         $found = Get-ChildItem -Path $drive -Filter "steamcmd.exe" `
             -Recurse -Depth 4 -ErrorAction SilentlyContinue |
             Select-Object -First 1
 
-        if ($found) { return $found.FullName }
+        if ($found) {
+            Add-Log "steamcmd.exe trouve : $($found.FullName)"
+            return $found.FullName
+        }
     }
+
+    Add-Log "Aucun steamcmd.exe trouve."
     return $null
 }
 
 function Get-AppManifestPath {
-    param($SteamCmdExePath)
+    param(
+        [string]$AcEvoPath,
+        [string]$SteamCmdExePath
+    )
 
-    $steamapps = Join-Path (Split-Path $SteamCmdExePath) "steamapps"
-    return "$steamapps\appmanifest_4564210.acf"
+    if (-not [string]::IsNullOrWhiteSpace($AcEvoPath)) {
+        $normalized = $AcEvoPath -replace '/', '\'
+
+        if ($normalized -match '\\steamapps\\common\\') {
+            $steamapps = $normalized -replace '\\common\\.*$', ''
+            return (Join-Path $steamapps "appmanifest_4564210.acf")
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SteamCmdExePath)) {
+        $steamCmdDir = Split-Path $SteamCmdExePath
+
+        if (-not [string]::IsNullOrWhiteSpace($steamCmdDir)) {
+            return (Join-Path $steamCmdDir "steamapps\appmanifest_4564210.acf")
+        }
+    }
+
+    throw "Impossible de deduire appmanifest_path depuis AcEvoPath='$AcEvoPath' et SteamCmdExePath='$SteamCmdExePath'"
 }
 
 function Download-Agent {
@@ -226,49 +280,56 @@ $form.Add_Shown({
     $SteamRoot = Find-SteamRoot
     $SteamCmdExe = Find-SteamCmd
 
-    if ($SteamRoot -and -not $SteamCmdExe) {
-        $ans = [System.Windows.Forms.MessageBox]::Show(
-            "Steam est installe mais steamcmd.exe est introuvable.`nVoulez-vous installer steamcmd maintenant ?",
-            "steamcmd manquant", "YesNo", "Question"
-        )
+    if (-not $SteamCmdExe) {
+        $cmdDir = "C:\SteamCMD"
+        $SteamCmdExe = Join-Path $cmdDir "steamcmd.exe"
 
-        if ($ans -eq "Yes") {
-            $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-            $dlg.Description = "Choisissez le dossier d'installation de steamcmd"
-            $dlg.SelectedPath = "C:\SteamCMD"
+        Add-Log "steamcmd.exe introuvable - installation automatique dans $cmdDir"
 
-            if ($dlg.ShowDialog() -eq "OK") {
-                $cmdDir = $dlg.SelectedPath
-                Add-Log "Telechargement steamcmd vers $cmdDir"
-                $zip = "$env:TEMP\steamcmd.zip"
+        try {
+            New-Item -ItemType Directory -Path $cmdDir -Force | Out-Null
 
-                Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" `
-                    -OutFile $zip -UseBasicParsing
-                Expand-Archive -Path $zip -DestinationPath $cmdDir -Force
-                Remove-Item $zip -Force -ErrorAction SilentlyContinue
-                $SteamCmdExe = "$cmdDir\steamcmd.exe"
-                Add-Log "steamcmd installe : $SteamCmdExe"
+            $zip = "$env:TEMP\steamcmd.zip"
+
+            Invoke-WebRequest -Uri "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip" `
+                -OutFile $zip -UseBasicParsing
+
+            Expand-Archive -Path $zip -DestinationPath $cmdDir -Force
+            Remove-Item $zip -Force -ErrorAction SilentlyContinue
+
+            if (-not (Test-Path $SteamCmdExe)) {
+                throw "steamcmd.exe introuvable apres extraction : $SteamCmdExe"
             }
+
+            Add-Log "steamcmd installe : $SteamCmdExe"
+        } catch {
+            Set-StepStatus 1 "error"
+            [System.Windows.Forms.MessageBox]::Show(
+                "Erreur installation steamcmd : $_",
+                "Erreur", "OK", "Error"
+            )
+            return
         }
+    } else {
+        Add-Log "steamcmd trouve : $SteamCmdExe"
     }
 
-    if ($SteamCmdExe) {
-        Add-Log "steamcmd trouve : $SteamCmdExe"
-        Set-StepStatus 1 "ok"
-    } else {
-        Add-Log "steamcmd non trouve - mise a jour distante desactivee"
-        Set-StepStatus 1 "skip"
-    }
+    Set-StepStatus 1 "ok"
 
     # [3] Deduction appmanifest
     Set-StepStatus 2 "running"
-    if ($SteamCmdExe) {
-        $AppManifestPath = Get-AppManifestPath $SteamCmdExe
+
+    try {
+        $AppManifestPath = Get-AppManifestPath -AcEvoPath $AcEvoPath -SteamCmdExePath $SteamCmdExe
         Add-Log "appmanifest : $AppManifestPath"
         Set-StepStatus 2 "ok"
-    } else {
-        $AppManifestPath = ""
-        Set-StepStatus 2 "skip"
+    } catch {
+        Set-StepStatus 2 "error"
+        [System.Windows.Forms.MessageBox]::Show(
+            "$_",
+            "Erreur appmanifest", "OK", "Error"
+        )
+        return
     }
 
     # [4] Telechargement agent
