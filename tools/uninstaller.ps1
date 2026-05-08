@@ -1,96 +1,19 @@
 #Requires -RunAsAdministrator
 
-<#
-PitLane uninstaller / reset tool.
-
-Encoding note:
-Save this file as UTF-8 with BOM for Windows PowerShell 5.1.
-In VS Code: Save with Encoding > UTF-8 with BOM.
-
-Usage prevu : tests d'installation, maintenance et remise a zero controlee.
-Par defaut, le script supprime uniquement :
-- l'agent PitLane
-- l'ancien agent pitlane-server-agent (legacy install)
-- la tache planifiee PitLaneAgent
-- les regles firewall prefixees "PitLane -"
-- les logs AC EVO
-- les configs AC EVO apres backup sur le Bureau
-
-Le dossier Results est conserve.
-
-Les suppressions avancees necessitent des options explicites :
--RemoveSteamCmd
--RemoveAcEvoServer
--RemovePythonDeps
-#>
-
-param(
-    [switch]$RemoveSteamCmd,
-    [switch]$RemoveAcEvoServer,
-    [switch]$RemovePythonDeps,
-    [switch]$DryRun
-)
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Continue"
 
-Write-Host ""
-Write-Host "=== PitLane uninstaller / reset tool ===" -ForegroundColor Cyan
-Write-Host ""
-
-function Confirm-DangerousAction {
-    param([string]$Message)
-
-    Write-Host ""
-    Write-Host $Message -ForegroundColor Red
-    $confirm = Read-Host "Tape RESET-PITLANE pour confirmer"
-
-    if ($confirm -ne "RESET-PITLANE") {
-        Write-Host "Annule." -ForegroundColor Yellow
-        exit 1
-    }
-}
-
-function Remove-PathSafe {
-    param([string]$Path)
-
-    if (-not $Path) { return }
-
-    if (Test-Path $Path) {
-        if ($DryRun) {
-            Write-Host "[DRY RUN] Supprimerait : $Path" -ForegroundColor DarkYellow
-        } else {
-            Write-Host "Suppression : $Path" -ForegroundColor Yellow
-            Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
-        }
-    }
-}
-
-function Backup-DirectorySafe {
-    param(
-        [string]$SourcePath,
-        [string]$DestinationPath
-    )
-
-    if (-not $SourcePath -or -not (Test-Path $SourcePath)) {
-        Write-Host "Aucun dossier a sauvegarder : $SourcePath"
-        return
-    }
-
-    if ($DryRun) {
-        Write-Host "[DRY RUN] Sauvegarderait : $SourcePath -> $DestinationPath" -ForegroundColor DarkYellow
-        return
-    }
-
-    Write-Host "Sauvegarde : $SourcePath -> $DestinationPath" -ForegroundColor Yellow
-    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
-    Copy-Item -Path (Join-Path $SourcePath "*") -Destination $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
-}
+# Utility functions
 
 function Find-AcEvoServer {
+    param([System.Windows.Forms.TextBox]$LogBox)
+
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
 
     foreach ($drive in $drives) {
-        Write-Host "Recherche AC EVO sur $drive ..."
+        Add-LogSafe -LogBox $LogBox -Message "Recherche AC EVO sur $drive ..."
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
             -Recurse -Depth 6 -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -104,10 +27,12 @@ function Find-AcEvoServer {
 }
 
 function Find-SteamCmd {
+    param([System.Windows.Forms.TextBox]$LogBox)
+
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
 
     foreach ($drive in $drives) {
-        Write-Host "Recherche steamcmd.exe sur $drive ..."
+        Add-LogSafe -LogBox $LogBox -Message "Recherche steamcmd.exe sur $drive ..."
         $found = Get-ChildItem -Path $drive -Filter "steamcmd.exe" `
             -Recurse -Depth 4 -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -120,134 +45,374 @@ function Find-SteamCmd {
     return $null
 }
 
-if ($RemoveSteamCmd -or $RemoveAcEvoServer -or $RemovePythonDeps) {
-    Confirm-DangerousAction "Attention : tu as demande une suppression avancee. SteamCMD, AC EVO ou des dependances Python peuvent etre supprimes."
+function Add-LogSafe {
+    param(
+        [System.Windows.Forms.TextBox]$LogBox,
+        [string]$Message
+    )
+
+    if (-not $Message) { return }
+    $LogBox.AppendText("$Message`r`n")
+    $LogBox.ScrollToCaret()
+    [System.Windows.Forms.Application]::DoEvents()
 }
 
-Write-Host "[1] Arret de l'agent PitLane" -ForegroundColor Cyan
+function Remove-PathSafe {
+    param(
+        [string]$Path,
+        [bool]$DryRun,
+        [System.Windows.Forms.TextBox]$LogBox
+    )
 
-if (-not $DryRun) {
-    Stop-ScheduledTask -TaskName "PitLaneAgent" -ErrorAction SilentlyContinue
-}
+    if (-not $Path) { return }
 
-Get-CimInstance Win32_Process -Filter "name = 'python.exe'" -ErrorAction SilentlyContinue |
-Where-Object {
-    $_.CommandLine -like "*pitlane-agent*" -or
-    $_.CommandLine -like "*pitlane-server-agent*" -or
-    $_.CommandLine -like "*app.py*"
-} |
-ForEach-Object {
-    if ($DryRun) {
-        Write-Host "[DRY RUN] Stopperait process python PID $($_.ProcessId)" -ForegroundColor DarkYellow
-    } else {
-        Write-Host "Stop process python PID $($_.ProcessId)"
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Write-Host ""
-Write-Host "[2] Suppression tache planifiee" -ForegroundColor Cyan
-
-if (Get-ScheduledTask -TaskName "PitLaneAgent" -ErrorAction SilentlyContinue) {
-    if ($DryRun) {
-        Write-Host "[DRY RUN] Supprimerait la tache PitLaneAgent" -ForegroundColor DarkYellow
-    } else {
-        Unregister-ScheduledTask -TaskName "PitLaneAgent" -Confirm:$false
-        Write-Host "Tache PitLaneAgent supprimee" -ForegroundColor Green
-    }
-} else {
-    Write-Host "Aucune tache PitLaneAgent trouvee"
-}
-
-Write-Host ""
-Write-Host "[3] Suppression regles firewall PitLane" -ForegroundColor Cyan
-
-$pitlaneRules = Get-NetFirewallRule -DisplayName "PitLane -*" -ErrorAction SilentlyContinue
-
-if ($pitlaneRules) {
-    foreach ($rule in $pitlaneRules) {
+    if (Test-Path $Path) {
         if ($DryRun) {
-            Write-Host "[DRY RUN] Supprimerait regle firewall : $($rule.DisplayName)" -ForegroundColor DarkYellow
+            Add-LogSafe -LogBox $LogBox -Message "[DRY RUN] Supprimerait : $Path"
         } else {
-            Write-Host "Suppression regle firewall : $($rule.DisplayName)"
-            $rule | Remove-NetFirewallRule
+            Add-LogSafe -LogBox $LogBox -Message "Suppression : $Path"
+            Remove-Item -Path $Path -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    } else {
+        Add-LogSafe -LogBox $LogBox -Message "Introuvable : $Path"
+    }
+}
+
+function Backup-DirectorySafe {
+    param(
+        [string]$SourcePath,
+        [string]$DestinationPath,
+        [bool]$DryRun,
+        [System.Windows.Forms.TextBox]$LogBox
+    )
+
+    if (-not $SourcePath -or -not (Test-Path $SourcePath)) {
+        Add-LogSafe -LogBox $LogBox -Message "Aucun dossier a sauvegarder : $SourcePath"
+        return
+    }
+
+    if ($DryRun) {
+        Add-LogSafe -LogBox $LogBox -Message "[DRY RUN] Sauvegarderait : $SourcePath -> $DestinationPath"
+        return
+    }
+
+    Add-LogSafe -LogBox $LogBox -Message "Sauvegarde : $SourcePath -> $DestinationPath"
+    New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
+    Copy-Item -Path (Join-Path $SourcePath "*") -Destination $DestinationPath -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# Main UI
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "PitLane - Uninstaller / Reset"
+$form.Size = New-Object System.Drawing.Size(720, 780)
+$form.StartPosition = "CenterScreen"
+$form.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
+$form.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+$form.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+$form.FormBorderStyle = "FixedDialog"
+$form.MaximizeBox = $false
+
+$titleLabel = New-Object System.Windows.Forms.Label
+$titleLabel.Text = "PitLane Uninstaller / Reset Tool"
+$titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 13, [System.Drawing.FontStyle]::Bold)
+$titleLabel.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 136)
+$titleLabel.Location = New-Object System.Drawing.Point(20, 14)
+$titleLabel.Size = New-Object System.Drawing.Size(660, 28)
+$form.Controls.Add($titleLabel)
+
+$warningLabel = New-Object System.Windows.Forms.Label
+$warningLabel.Text = "Standard reset removes agent, task, firewall rules, logs, and backups configs. Results are kept."
+$warningLabel.Location = New-Object System.Drawing.Point(20, 43)
+$warningLabel.Size = New-Object System.Drawing.Size(660, 22)
+$warningLabel.ForeColor = [System.Drawing.Color]::FromArgb(240, 165, 0)
+$form.Controls.Add($warningLabel)
+
+$optionsPanel = New-Object System.Windows.Forms.Panel
+$optionsPanel.Location = New-Object System.Drawing.Point(20, 70)
+$optionsPanel.Size = New-Object System.Drawing.Size(660, 92)
+$optionsPanel.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+$optionsPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($optionsPanel)
+
+$dryRunChk = New-Object System.Windows.Forms.CheckBox
+$dryRunChk.Text = "Dry run only"
+$dryRunChk.Location = New-Object System.Drawing.Point(12, 10)
+$dryRunChk.Size = New-Object System.Drawing.Size(160, 22)
+$dryRunChk.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+$dryRunChk.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+$optionsPanel.Controls.Add($dryRunChk)
+
+$removeSteamChk = New-Object System.Windows.Forms.CheckBox
+$removeSteamChk.Text = "Remove SteamCMD"
+$removeSteamChk.Location = New-Object System.Drawing.Point(12, 42)
+$removeSteamChk.Size = New-Object System.Drawing.Size(180, 22)
+$removeSteamChk.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+$removeSteamChk.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+$optionsPanel.Controls.Add($removeSteamChk)
+
+$removeAcEvoChk = New-Object System.Windows.Forms.CheckBox
+$removeAcEvoChk.Text = "Remove AC EVO server"
+$removeAcEvoChk.Location = New-Object System.Drawing.Point(220, 42)
+$removeAcEvoChk.Size = New-Object System.Drawing.Size(210, 22)
+$removeAcEvoChk.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+$removeAcEvoChk.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+$optionsPanel.Controls.Add($removeAcEvoChk)
+
+$removePythonChk = New-Object System.Windows.Forms.CheckBox
+$removePythonChk.Text = "Remove Python deps"
+$removePythonChk.Location = New-Object System.Drawing.Point(455, 42)
+$removePythonChk.Size = New-Object System.Drawing.Size(190, 22)
+$removePythonChk.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+$removePythonChk.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+$optionsPanel.Controls.Add($removePythonChk)
+
+$stepsPanel = New-Object System.Windows.Forms.Panel
+$stepsPanel.Location = New-Object System.Drawing.Point(20, 175)
+$stepsPanel.Size = New-Object System.Drawing.Size(660, 300)
+$stepsPanel.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+$stepsPanel.BorderStyle = "FixedSingle"
+$form.Controls.Add($stepsPanel)
+
+$steps = @(
+    "[1] Arret de l'agent PitLane",
+    "[2] Suppression tache planifiee",
+    "[3] Suppression regles firewall",
+    "[4] Detection installations",
+    "[5] Backup configs et nettoyage logs/configs",
+    "[6] Suppression agent PitLane",
+    "[7] Suppressions avancees",
+    "[8] Termine"
+)
+
+$stepLabels = @()
+for ($i = 0; $i -lt $steps.Count; $i++) {
+    $lbl = New-Object System.Windows.Forms.Label
+    $lbl.Text = "WAIT " + $steps[$i]
+    $lbl.Location = New-Object System.Drawing.Point(10, (8 + $i * 34))
+    $lbl.Size = New-Object System.Drawing.Size(635, 26)
+    $lbl.ForeColor = [System.Drawing.Color]::FromArgb(139, 148, 158)
+    $stepsPanel.Controls.Add($lbl)
+    $stepLabels += $lbl
+}
+
+$progressBar = New-Object System.Windows.Forms.ProgressBar
+$progressBar.Location = New-Object System.Drawing.Point(20, 488)
+$progressBar.Size = New-Object System.Drawing.Size(660, 16)
+$progressBar.Maximum = $steps.Count
+$form.Controls.Add($progressBar)
+
+$logBox = New-Object System.Windows.Forms.TextBox
+$logBox.Location = New-Object System.Drawing.Point(20, 515)
+$logBox.Size = New-Object System.Drawing.Size(660, 155)
+$logBox.Multiline = $true
+$logBox.ScrollBars = "Vertical"
+$logBox.ReadOnly = $true
+$logBox.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
+$logBox.ForeColor = [System.Drawing.Color]::FromArgb(139, 148, 158)
+$logBox.Font = New-Object System.Drawing.Font("Consolas", 8)
+$form.Controls.Add($logBox)
+
+function Set-StepStatus {
+    param($index, $status)
+
+    $label = $stepLabels[$index]
+    $base = $steps[$index]
+
+    switch ($status) {
+        "running" { $label.Text = "> $base";     $label.ForeColor = [System.Drawing.Color]::FromArgb(240, 165, 0) }
+        "ok"      { $label.Text = "OK $base";    $label.ForeColor = [System.Drawing.Color]::FromArgb(0, 255, 136) }
+        "error"   { $label.Text = "ERROR $base"; $label.ForeColor = [System.Drawing.Color]::FromArgb(255, 68, 68) }
+        "skip"    { $label.Text = "SKIP $base";  $label.ForeColor = [System.Drawing.Color]::FromArgb(110, 118, 129) }
+    }
+
+    $progressBar.Value = [Math]::Min($index + 1, $progressBar.Maximum)
+    [System.Windows.Forms.Application]::DoEvents()
+}
+
+function Add-Log {
+    param($msg)
+    Add-LogSafe -LogBox $logBox -Message $msg
+}
+
+$runBtn = New-Object System.Windows.Forms.Button
+$runBtn.Text = "Run reset"
+$runBtn.Location = New-Object System.Drawing.Point(445, 695)
+$runBtn.Size = New-Object System.Drawing.Size(110, 30)
+$runBtn.BackColor = [System.Drawing.Color]::FromArgb(0, 255, 136)
+$runBtn.ForeColor = [System.Drawing.Color]::Black
+$runBtn.FlatStyle = "Flat"
+$form.Controls.Add($runBtn)
+
+$closeBtn = New-Object System.Windows.Forms.Button
+$closeBtn.Text = "Fermer"
+$closeBtn.Location = New-Object System.Drawing.Point(570, 695)
+$closeBtn.Size = New-Object System.Drawing.Size(110, 30)
+$closeBtn.BackColor = [System.Drawing.Color]::FromArgb(48, 54, 61)
+$closeBtn.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+$closeBtn.FlatStyle = "Flat"
+$closeBtn.Add_Click({ $form.Close() })
+$form.Controls.Add($closeBtn)
+
+$runBtn.Add_Click({
+    $runBtn.Enabled = $false
+    $dryRun = $dryRunChk.Checked
+    $removeSteamCmd = $removeSteamChk.Checked
+    $removeAcEvoServer = $removeAcEvoChk.Checked
+    $removePythonDeps = $removePythonChk.Checked
+
+    if ($removeSteamCmd -or $removeAcEvoServer -or $removePythonDeps) {
+        $answer = [System.Windows.Forms.MessageBox]::Show(
+            "Suppressions avancees demandees.`nSteamCMD, AC EVO ou des dependances Python peuvent etre supprimes.`nContinuer ?",
+            "Confirmation", "YesNo", "Warning"
+        )
+
+        if ($answer -ne "Yes") {
+            Add-Log "Annule par utilisateur."
+            $runBtn.Enabled = $true
+            return
         }
     }
-} else {
-    Write-Host "Aucune regle firewall PitLane trouvee"
-}
 
-Write-Host ""
-Write-Host "[4] Detection installations" -ForegroundColor Cyan
+    try {
+        Add-Log "=== PitLane uninstaller / reset tool ==="
+        if ($dryRun) { Add-Log "Mode DRY RUN actif." }
 
-$AcEvoPath = Find-AcEvoServer
-$SteamCmdExe = Find-SteamCmd
+        # [1] Stop agent
+        Set-StepStatus 0 "running"
+        if (-not $dryRun) {
+            Stop-ScheduledTask -TaskName "PitLaneAgent" -ErrorAction SilentlyContinue
+        } else {
+            Add-Log "[DRY RUN] Stopperait la tache PitLaneAgent"
+        }
 
-Write-Host "AC EVO   : $AcEvoPath"
-Write-Host "SteamCMD : $SteamCmdExe"
+        Get-CimInstance Win32_Process -Filter "name = 'python.exe'" -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -like "*pitlane-agent*" -or
+            $_.CommandLine -like "*pitlane-server-agent*" -or
+            $_.CommandLine -like "*app.py*"
+        } |
+        ForEach-Object {
+            if ($dryRun) {
+                Add-Log "[DRY RUN] Stopperait process python PID $($_.ProcessId)"
+            } else {
+                Add-Log "Stop process python PID $($_.ProcessId)"
+                Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+            }
+        }
+        Set-StepStatus 0 "ok"
 
-Write-Host ""
-Write-Host "[5] Backup configs et nettoyage fichiers generes" -ForegroundColor Cyan
+        # [2] Scheduled task
+        Set-StepStatus 1 "running"
+        if (Get-ScheduledTask -TaskName "PitLaneAgent" -ErrorAction SilentlyContinue) {
+            if ($dryRun) {
+                Add-Log "[DRY RUN] Supprimerait la tache PitLaneAgent"
+            } else {
+                Unregister-ScheduledTask -TaskName "PitLaneAgent" -Confirm:$false
+                Add-Log "Tache PitLaneAgent supprimee"
+            }
+        } else {
+            Add-Log "Aucune tache PitLaneAgent trouvee"
+        }
+        Set-StepStatus 1 "ok"
 
-if ($AcEvoPath) {
-    $DesktopPath = [Environment]::GetFolderPath("Desktop")
-    $ConfigBackupPath = Join-Path $DesktopPath "PitLane AC EVO config backup"
+        # [3] Firewall
+        Set-StepStatus 2 "running"
+        $pitlaneRules = Get-NetFirewallRule -DisplayName "PitLane -*" -ErrorAction SilentlyContinue
 
-    Backup-DirectorySafe -SourcePath "$AcEvoPath\configs" -DestinationPath $ConfigBackupPath
-    Remove-PathSafe "$AcEvoPath\configs"
-    Remove-PathSafe "$AcEvoPath\logs"
-} else {
-    Write-Host "AC EVO introuvable, impossible de nettoyer configs/logs"
-}
+        if ($pitlaneRules) {
+            foreach ($rule in $pitlaneRules) {
+                if ($dryRun) {
+                    Add-Log "[DRY RUN] Supprimerait regle firewall : $($rule.DisplayName)"
+                } else {
+                    Add-Log "Suppression regle firewall : $($rule.DisplayName)"
+                    $rule | Remove-NetFirewallRule
+                }
+            }
+        } else {
+            Add-Log "Aucune regle firewall PitLane trouvee"
+        }
+        Set-StepStatus 2 "ok"
 
-Write-Host ""
-Write-Host "[6] Suppression agent PitLane" -ForegroundColor Cyan
+        # [4] Detection
+        Set-StepStatus 3 "running"
+        $AcEvoPath = Find-AcEvoServer -LogBox $logBox
+        $SteamCmdExe = Find-SteamCmd -LogBox $logBox
+        Add-Log "AC EVO   : $AcEvoPath"
+        Add-Log "SteamCMD : $SteamCmdExe"
+        Set-StepStatus 3 "ok"
 
-if ($AcEvoPath) {
-    Remove-PathSafe "$AcEvoPath\pitlane-agent"
-    Remove-PathSafe "$AcEvoPath\pitlane-server-agent"
-} else {
-    Write-Host "AC EVO introuvable, impossible de deduire le chemin de l'agent"
-}
+        # [5] Backup configs and cleanup generated files
+        Set-StepStatus 4 "running"
+        if ($AcEvoPath) {
+            $DesktopPath = [Environment]::GetFolderPath("Desktop")
+            $ConfigBackupPath = Join-Path $DesktopPath "PitLane AC EVO config backup"
 
-if ($RemoveSteamCmd) {
-    Write-Host ""
-    Write-Host "[7] Suppression SteamCMD" -ForegroundColor Cyan
+            Backup-DirectorySafe -SourcePath "$AcEvoPath\configs" -DestinationPath $ConfigBackupPath -DryRun $dryRun -LogBox $logBox
+            Remove-PathSafe -Path "$AcEvoPath\configs" -DryRun $dryRun -LogBox $logBox
+            Remove-PathSafe -Path "$AcEvoPath\logs" -DryRun $dryRun -LogBox $logBox
+        } else {
+            Add-Log "AC EVO introuvable, impossible de nettoyer configs/logs"
+        }
+        Set-StepStatus 4 "ok"
 
-    if ($SteamCmdExe) {
-        $SteamCmdDir = Split-Path $SteamCmdExe
-        Remove-PathSafe $SteamCmdDir
-    } else {
-        Write-Host "steamcmd.exe introuvable"
+        # [6] Remove agent
+        Set-StepStatus 5 "running"
+        if ($AcEvoPath) {
+            Remove-PathSafe -Path "$AcEvoPath\pitlane-agent" -DryRun $dryRun -LogBox $logBox
+            Remove-PathSafe -Path "$AcEvoPath\pitlane-server-agent" -DryRun $dryRun -LogBox $logBox
+        } else {
+            Add-Log "AC EVO introuvable, impossible de deduire le chemin de l'agent"
+        }
+        Set-StepStatus 5 "ok"
+
+        # [7] Advanced cleanup
+        Set-StepStatus 6 "running"
+
+        if ($removeSteamCmd) {
+            if ($SteamCmdExe) {
+                $SteamCmdDir = Split-Path $SteamCmdExe
+                Remove-PathSafe -Path $SteamCmdDir -DryRun $dryRun -LogBox $logBox
+            } else {
+                Add-Log "steamcmd.exe introuvable"
+            }
+
+            Remove-PathSafe -Path "C:\SteamCMD" -DryRun $dryRun -LogBox $logBox
+        }
+
+        if ($removeAcEvoServer) {
+            if ($AcEvoPath) {
+                Remove-PathSafe -Path $AcEvoPath -DryRun $dryRun -LogBox $logBox
+            } else {
+                Add-Log "AC EVO introuvable"
+            }
+        }
+
+        if ($removePythonDeps) {
+            if ($dryRun) {
+                Add-Log "[DRY RUN] Desinstallerait les dependances Python PitLane"
+            } else {
+                Add-Log "Desinstallation dependances Python PitLane"
+                python -m pip uninstall -y flask flask-cors pyjwt pyyaml requests psutil waitress 2>$null
+            }
+        }
+
+        if (-not $removeSteamCmd -and -not $removeAcEvoServer -and -not $removePythonDeps) {
+            Add-Log "Aucune suppression avancee demandee"
+        }
+
+        Set-StepStatus 6 "ok"
+
+        # [8] Done
+        Set-StepStatus 7 "ok"
+        Add-Log "Results conserve volontairement."
+        Add-Log "Desinstallation / reset termine."
+    } catch {
+        Add-Log "ERROR : $_"
+        [System.Windows.Forms.MessageBox]::Show("Erreur pendant le reset : $_", "Erreur", "OK", "Error")
     }
 
-    Remove-PathSafe "C:\SteamCMD"
-}
+    $runBtn.Enabled = $true
+})
 
-if ($RemoveAcEvoServer) {
-    Write-Host ""
-    Write-Host "[8] Suppression AC EVO Dedicated Server" -ForegroundColor Cyan
-
-    if ($AcEvoPath) {
-        Remove-PathSafe $AcEvoPath
-    } else {
-        Write-Host "AC EVO introuvable"
-    }
-}
-
-if ($RemovePythonDeps) {
-    Write-Host ""
-    Write-Host "[9] Suppression dependances Python PitLane" -ForegroundColor Cyan
-
-    if ($DryRun) {
-        Write-Host "[DRY RUN] Desinstallerait les dependances Python PitLane" -ForegroundColor DarkYellow
-    } else {
-        python -m pip uninstall -y flask flask-cors pyjwt pyyaml requests psutil waitress 2>$null
-    }
-}
-
-Write-Host ""
-Write-Host "Results conserve volontairement." -ForegroundColor Green
-Write-Host "Desinstallation / reset termine." -ForegroundColor Green
-Write-Host ""
-Read-Host "Appuie sur Entree pour fermer"
+[System.Windows.Forms.Application]::Run($form)

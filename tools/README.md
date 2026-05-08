@@ -1,16 +1,16 @@
-# Outils de développement
+# Outils de developpement
 
 ## `uninstaller.ps1`
 
-Script de désinstallation / reset pour tester les installateurs PitLane sur un serveur Windows, ou remettre proprement une installation de test.
+Outil Windows Forms de desinstallation / reset pour tester les installateurs PitLane sur un serveur Windows, ou remettre proprement une installation de test.
 
 > [!WARNING]
-> Outil de développement / maintenance uniquement.
+> Outil de developpement / maintenance uniquement.
 > Ne pas inclure dans `agent.zip`.
 
 ---
 
-## Emplacement
+## Emplacement dans le repo
 
 ```txt
 tools/uninstaller.ps1
@@ -18,105 +18,157 @@ tools/uninstaller.ps1
 
 ---
 
-## Ce que fait la désinstallation standard
+## Telecharger `uninstaller.ps1`
 
-Commande :
+Ouvrir PowerShell sur le serveur Windows, puis executer :
 
 ```powershell
-.\tools\uninstaller.ps1
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.ps1" `
+  -OutFile "$env:USERPROFILE\Downloads\uninstaller.ps1"
 ```
 
-Supprime uniquement :
+Le fichier sera telecharge dans :
 
-* l’agent PitLane
-* la tâche planifiée `PitLaneAgent`
-* les règles firewall préfixées `PitLane -`
+```txt
+%USERPROFILE%\Downloads
+```
 
-Ne supprime pas :
+---
+
+## Lancement
+
+Ouvrir PowerShell en administrateur, puis lancer :
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\uninstaller.ps1"
+```
+
+Le script ouvre une interface graphique avec :
+
+* une liste des etapes
+* une zone de logs
+* une barre de progression
+* un bouton `Run reset`
+* un bouton `Fermer`
+* des cases a cocher pour les suppressions avancees
+
+---
+
+## Debloquer le fichier si necessaire
+
+Si Windows bloque l'execution du script parce qu'il vient d'Internet :
+
+```powershell
+Unblock-File "$env:USERPROFILE\Downloads\uninstaller.ps1"
+```
+
+Puis relancer :
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\uninstaller.ps1"
+```
+
+---
+
+## Reset standard
+
+Sans cocher d'option avancee, le bouton `Run reset` supprime :
+
+* l'agent PitLane `pitlane-agent/`
+* l'ancien agent legacy `pitlane-server-agent/`
+* la tache planifiee `PitLaneAgent`
+* les regles firewall prefixees `PitLane -`
+* le dossier `logs/`
+* le dossier `configs/` apres sauvegarde
+
+Le dossier `configs/` est sauvegarde sur le Bureau dans :
+
+```txt
+PitLane AC EVO config backup
+```
+
+---
+
+## Ce qui est conserve par defaut
+
+Le reset standard ne supprime pas :
 
 * AC EVO Dedicated Server
 * SteamCMD
 * Python
-* les dépendances Python
+* les dependances Python
+* le dossier `Results/`
+
+`Results/` est volontairement conserve.
 
 ---
 
-## Mode simulation
+## Options dans l'interface
 
-Permet de voir ce qui serait supprimé sans rien supprimer réellement.
-
-```powershell
-.\tools\uninstaller.ps1 -DryRun
-```
-
----
-
-## Simulation : AC EVO installé, sans SteamCMD
-
-```powershell
-.\tools\uninstaller.ps1 -RemoveSteamCmd
-```
+| Option                 | Effet                                                    |
+| ---------------------- | -------------------------------------------------------- |
+| `Dry run only`         | Affiche les actions prevues sans rien supprimer          |
+| `Remove SteamCMD`      | Supprime SteamCMD                                        |
+| `Remove AC EVO server` | Supprime le dossier AC EVO Dedicated Server              |
+| `Remove Python deps`   | Desinstalle les dependances Python utilisees par PitLane |
 
 ---
 
-## Simulation : SteamCMD installé, sans AC EVO
+## Securite
 
-```powershell
-.\tools\uninstaller.ps1 -RemoveAcEvoServer
-```
+Les suppressions avancees demandent une confirmation via une popup Windows.
 
----
-
-## Simulation : serveur vierge
-
-```powershell
-.\tools\uninstaller.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
-```
+Le script ne supprime jamais SteamCMD, AC EVO ou les dependances Python sans option explicite.
 
 ---
 
-## Options disponibles
+## Scenarios de test
 
-| Option               | Effet                                                    |
-| -------------------- | -------------------------------------------------------- |
-| `-DryRun`            | Affiche les suppressions prévues sans rien supprimer     |
-| `-RemoveSteamCmd`    | Supprime SteamCMD                                        |
-| `-RemoveAcEvoServer` | Supprime AC EVO Dedicated Server                         |
-| `-RemovePythonDeps`  | Désinstalle les dépendances Python utilisées par PitLane |
+### Reset standard entre deux tests
 
----
-
-## Sécurité
-
-Les suppressions avancées demandent une confirmation manuelle :
-
-```txt
-RESET-PITLANE
-```
-
-Le script ne supprime jamais SteamCMD, AC EVO ou les dépendances Python sans option explicite.
+1. Lancer `uninstaller.ps1`
+2. Ne cocher aucune option avancee
+3. Cliquer sur `Run reset`
 
 ---
 
-## Exemples rapides
+### Simulation sans suppression
 
-Désinstallation standard :
+1. Lancer `uninstaller.ps1`
+2. Cocher `Dry run only`
+3. Cliquer sur `Run reset`
 
-```powershell
-.\tools\uninstaller.ps1
-```
+---
 
-Reset complet serveur vierge :
+### Simulation : AC EVO installe, sans SteamCMD
 
-```powershell
-.\tools\uninstaller.ps1 -RemoveSteamCmd -RemoveAcEvoServer -RemovePythonDeps
-```
+1. Lancer `uninstaller.ps1`
+2. Cocher `Remove SteamCMD`
+3. Cliquer sur `Run reset`
+4. Confirmer la popup
 
-Test sans rien supprimer :
+---
 
-```powershell
-.\tools\uninstaller.ps1 -DryRun
-```
+### Simulation : SteamCMD installe, sans AC EVO
+
+1. Lancer `uninstaller.ps1`
+2. Cocher `Remove AC EVO server`
+3. Cliquer sur `Run reset`
+4. Confirmer la popup
+
+---
+
+### Simulation : serveur vierge
+
+1. Lancer `uninstaller.ps1`
+2. Cocher :
+
+   * `Remove SteamCMD`
+   * `Remove AC EVO server`
+   * `Remove Python deps`
+3. Cliquer sur `Run reset`
+4. Confirmer la popup
 
 ---
 
@@ -128,4 +180,4 @@ Le workflow GitHub Release zippe uniquement le dossier :
 agent/
 ```
 
-Donc ce script n’est pas inclus dans `agent.zip`.
+Donc ce script n'est pas inclus dans `agent.zip`.
