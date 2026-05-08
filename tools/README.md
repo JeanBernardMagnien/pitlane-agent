@@ -22,6 +22,15 @@ tools/uninstaller.ps1
 
 Ouvrir PowerShell sur le serveur Windows, puis executer :
 
+Le .exe  
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\uninstaller.exe"
+```
+ou le ps1
+
 ```powershell
 Invoke-WebRequest `
   -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.ps1" `
