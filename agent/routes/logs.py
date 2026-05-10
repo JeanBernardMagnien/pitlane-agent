@@ -5,7 +5,7 @@ from flask import jsonify
 from core import config_store
 from core.auth import require_jwt
 from core.http_helpers import get_instance_or_404
-from log_streamer import tail_log
+from services.log_streamer import tail_log
 
 
 def register_log_routes(app, sock):
