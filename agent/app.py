@@ -578,10 +578,30 @@ def steam_update():
         '+quit',
     ]
 
+    # Use PIPE + drain thread so we can flush incrementally to the log file.
+    # steamcmd buffers its output when not connected to a TTY; we still get
+    # the full output as soon as each internal flush occurs.
+    create_flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        creationflags=create_flags,
+    )
+
+    def _drain(proc, path):
+        with open(path, 'wb') as f:
+            while True:
+                chunk = proc.stdout.read(256)
+                if not chunk:
+                    break
+                f.write(chunk)
+                f.flush()
+
+    threading.Thread(target=_drain, args=(process, str(log_path)), daemon=True).start()
+
     with _steam_process_lock:
-        log_file = open(str(log_path), 'w', encoding='utf-8')
-        process = subprocess.Popen(cmd, stdout=log_file, stderr=log_file)
-        _steam_process = {'process': process, 'log_file': log_file}
+        _steam_process = {'process': process}
 
     return jsonify({'status': 'started', 'pid': process.pid}), 202
 
@@ -597,7 +617,12 @@ def steam_update_logs():
     if not log_path.exists():
         return jsonify({'lines': [], 'finished': True, 'success': False})
 
-    lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines()[-100:]
+    raw = log_path.read_bytes()
+    text = raw.decode('utf-8', errors='replace')
+    # steamcmd uses \r to overwrite progress lines in a terminal.
+    # For each \n-delimited line, keep only the last \r-segment so the UI
+    # shows the final state of each progress line rather than raw escape chars.
+    lines = [line.split('\r')[-1] for line in text.split('\n')][-100:]
 
     with _steam_process_lock:
         proc = _steam_process.get('process') if _steam_process else None
