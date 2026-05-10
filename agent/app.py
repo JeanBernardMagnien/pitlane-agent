@@ -234,8 +234,7 @@ def create_instance():
 
     required = ['id', 'name', 'tcp_port', 'udp_port', 'http_port']
     for field in required:
-        if not body.get(field):
-            return error(f"Champ '{field}' requis")
+        if not body.get(field):            return error(f"Champ '{field}' requis")
 
     info = get_system_info()
     if info['current_instances'] >= info['max_instances']:
