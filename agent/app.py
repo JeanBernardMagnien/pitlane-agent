@@ -586,11 +586,11 @@ def steam_update_logs():
     return jsonify({'lines': lines, 'finished': finished})
 
 
-@app.route('/api/steam/update-check', methods=['GET'])
+@app.route('/api/steam/update-check', methods=['POST'])
 def steam_update_check():
     """
-    Compare le build local (appmanifest) au build distant (steamcmd app_info_print).
-    Aucune API publique Steam n’existe pour cela — steamcmd anonymous est la seule méthode.
+    Compare le build local (appmanifest) au build distant via steamcmd app_info_print.
+    Nécessite des identifiants Steam valides (le login anonymous est insuffisant).
     """
     require_jwt()
 
@@ -604,6 +604,12 @@ def steam_update_check():
     appmanifest_path = steam_cfg.get('appmanifest_path', '')
     if not appmanifest_path:
         return error('Chemin appmanifest non configuré', 503)
+
+    body = request.get_json(silent=True) or {}
+    username = body.get('steam_username', '').strip()
+    password = body.get('steam_password', '').strip()
+    if not username or not password:
+        return error('steam_username et steam_password requis', 400)
 
     manifest_file = Path(appmanifest_path)
     if not manifest_file.exists():
@@ -621,18 +627,18 @@ def steam_update_check():
         result = subprocess.run(
             [
                 steamcmd_path,
-                '+login', 'anonymous',
+                '+login', username, password,
                 '+app_info_update', '1',
                 '+app_info_print', app_id,
                 '+quit',
             ],
             capture_output=True,
             text=True,
-            timeout=60,
+            timeout=90,
         )
         output = result.stdout
     except subprocess.TimeoutExpired:
-        return error('steamcmd timeout (60s)', 504)
+        return error('steamcmd timeout (90s)', 504)
     except Exception as e:
         return error(f"steamcmd erreur : {e}", 502)
 
