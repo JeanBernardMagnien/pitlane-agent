@@ -122,6 +122,20 @@ def _close_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int)
             errors.append(f"{proto}/{port}: {result.stderr.strip()}")
     return errors
 
+def _vdf_block(text: str, key: str, start: int = 0) -> str | None:
+    m = re.search(rf'"{re.escape(key)}"\s*\{{', text[start:])
+    if not m:
+        return None
+    pos = start + m.end()
+    depth = 1
+    while pos < len(text) and depth:
+        if text[pos] == '{':
+            depth += 1
+        elif text[pos] == '}':
+            depth -= 1
+        pos += 1
+    return text[start + m.end(): pos - 1]
+
 # ─── Flask ──────────────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -643,13 +657,17 @@ def steam_update_check():
         return error(f"steamcmd erreur : {e}", 502)
 
     # Parse the "public" branch buildid from steamcmd VDF output
-    public_match = re.search(r'"public"\s*\{([^}]*)\}', output)
-    if not public_match:
-        return error('Section "public" introuvable dans la sortie steamcmd', 502)
-
-    remote_match = re.search(r'"buildid"\s+"(\d+)"', public_match.group(1))
+        # Après :
+    branches_block = _vdf_block(output, 'branches')
+    if not branches_block:
+        return error('Section "branches" introuvable dans la sortie steamcmd', 502)
+    public_block = _vdf_block(branches_block, 'public')
+    if not public_block:
+        return error('Branche "public" introuvable dans steamcmd', 502)
+    remote_match = re.search(r'"buildid"\s+"(\d+)"', public_block)
     if not remote_match:
-        return error('buildid distant introuvable dans la sortie steamcmd', 502)
+        return error('buildid distant introuvable dans la branche public', 502)
+    remote_buildid = int(remote_match.group(1))
 
     remote_buildid = int(remote_match.group(1))
     up_to_date = (local_buildid == remote_buildid)
