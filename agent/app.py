@@ -122,6 +122,27 @@ def _close_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int)
             errors.append(f"{proto}/{port}: {result.stderr.strip()}")
     return errors
 
+# ─── VDF helpers ──────────────────────────────────────────────────────────────────────────────
+
+def _vdf_block(text: str, key: str, start: int = 0) -> str | None:
+    """
+    Extrait le contenu du premier bloc {…} associé à `key` dans du texte VDF,
+    en comptant les accolades pour gérer les blocs imbriqués.
+    Retourne le contenu sans les accolades externes, ou None si non trouvé.
+    """
+    m = re.search(rf'"{ re.escape(key) }"\s*\{{', text[start:])
+    if not m:
+        return None
+    pos = start + m.end()
+    depth = 1
+    while pos < len(text) and depth:
+        if text[pos] == '{':
+            depth += 1
+        elif text[pos] == '}':
+            depth -= 1
+        pos += 1
+    return text[start + m.end(): pos - 1]
+
 # ─── Flask ──────────────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -590,7 +611,10 @@ def steam_update_logs():
 def steam_update_check():
     """
     Compare le build local (appmanifest) au build distant via steamcmd app_info_print.
-    Nécessite des identifiants Steam valides (le login anonymous est insuffisant).
+    Nécessite des identifiants Steam valides.
+
+    Le VDF de steamcmd contient plusieurs blocs "public" (un par dépôt dans "manifests").
+    On navigue explicitement dans branches > public pour éviter les faux positifs.
     """
     require_jwt()
 
@@ -642,14 +666,19 @@ def steam_update_check():
     except Exception as e:
         return error(f"steamcmd erreur : {e}", 502)
 
-    # Parse the "public" branch buildid from steamcmd VDF output
-    public_match = re.search(r'"public"\s*\{([^}]*)\}', output)
-    if not public_match:
-        return error('Section "public" introuvable dans la sortie steamcmd', 502)
+    # Navigate branches > public using brace-counting to avoid matching
+    # the "public" manifest blocks inside each depot's "manifests" section.
+    branches_block = _vdf_block(output, 'branches')
+    if not branches_block:
+        return error('Section "branches" introuvable dans la sortie steamcmd', 502)
 
-    remote_match = re.search(r'"buildid"\s+"(\d+)"', public_match.group(1))
+    public_block = _vdf_block(branches_block, 'public')
+    if not public_block:
+        return error('Branche "public" introuvable dans steamcmd', 502)
+
+    remote_match = re.search(r'"buildid"\s+"(\d+)"', public_block)
     if not remote_match:
-        return error('buildid distant introuvable dans la sortie steamcmd', 502)
+        return error('buildid distant introuvable dans la branche public', 502)
 
     remote_buildid = int(remote_match.group(1))
     up_to_date = (local_buildid == remote_buildid)
