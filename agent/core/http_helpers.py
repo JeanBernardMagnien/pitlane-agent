@@ -1,7 +1,7 @@
 from flask import abort, jsonify
 
 from core import config_store
-from server_manager import get_last_config
+from services.server_manager import get_last_config
 
 
 def error(msg: str, code: int = 400):
