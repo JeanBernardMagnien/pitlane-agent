@@ -546,7 +546,6 @@ def steam_update():
     with _config_lock:
         steam_cfg = CFG.get('steam', {})
         logs_path = LOGGING_CFG['logs_path']
-        install_path = GAME_CFG['install_path']
 
     steamcmd_path = steam_cfg.get('steamcmd_path', '')
     if not steamcmd_path:
@@ -571,9 +570,10 @@ def steam_update():
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / 'steam_update.log'
 
+    # No +force_install_dir: steamcmd reads its own manifest to find the correct
+    # install location, avoiding creation of a spurious steamapps/ subfolder.
     cmd = [
         steamcmd_path,
-        '+force_install_dir', install_path,
         '+login', username, password,
         '+app_update', app_id, 'validate',
         '+quit',
