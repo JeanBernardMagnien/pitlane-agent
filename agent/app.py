@@ -569,10 +569,10 @@ def steam_update():
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / 'steam_update.log'
 
-    # No +force_install_dir: steamcmd reads its own manifest to find the correct
-    # install location, avoiding creation of a spurious steamapps/ subfolder.
+    steamcmd_dir = str(Path(steamcmd_path).parent)
     cmd = [
         steamcmd_path,
+        '+force_install_dir', steamcmd_dir,
         '+login', username, password,
         '+app_update', app_id, 'validate',
         '+quit',
