@@ -6,7 +6,7 @@ from flask import jsonify, request
 from core import config_store
 from core.auth import require_jwt
 from core.http_helpers import error
-from server_manager import list_configs
+from services.server_manager import list_configs
 
 
 def register_config_routes(app):
