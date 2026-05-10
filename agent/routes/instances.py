@@ -7,8 +7,8 @@ from core.auth import require_jwt
 from core.firewall import close_ports, open_ports
 from core.http_helpers import error, get_instance_or_404, resolve_filename
 from core.system_info import get_system_info
-from encode_config import encode_file
-from server_manager import (
+from services.encode_config import encode_file
+from services.server_manager import (
     _running,
     get_instance_status,
     restart_instance,
