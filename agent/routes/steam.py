@@ -45,10 +45,10 @@ def register_steam_routes(app):
             return error('Chemin appmanifest non configuré', 503)
 
         body = request.get_json(silent=True) or {}
-        username = body.get('STEAM_USERNAME_FIELD', '').strip()
-        password = body.get('STEAM_PASSWORD_FIELD', '').strip()
+        username = body.get('steam_username', '').strip()
+        password = body.get('steam_password', '').strip()
         if not username or not password:
-            return error('STEAM_USERNAME_FIELD et STEAM_PASSWORD_FIELD requis', 400)
+            return error('steam_username et steam_password requis', 400)
 
         manifest_file = Path(appmanifest_path)
         if not manifest_file.exists():
@@ -122,10 +122,10 @@ def register_steam_routes(app):
             return error('Arrêtez les instances avant de mettre à jour', 409)
 
         body = request.get_json(silent=True) or {}
-        username = body.get('STEAM_USERNAME_FIELD')
-        password = body.get('STEAM_PASSWORD_FIELD')
+        username = body.get('steam_username')
+        password = body.get('steam_password')
         if not username or not password:
-            return error('STEAM_USERNAME_FIELD et STEAM_PASSWORD_FIELD requis', 400)
+            return error('steam_username et steam_password requis', 400)
 
         app_id = str(steam_cfg.get('app_id', 4564210))
         logs_dir = Path(logs_path)

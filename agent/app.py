@@ -9,6 +9,7 @@ from core.system_info import get_system_info
 from routes.configs import register_config_routes
 from routes.instances import register_instance_routes
 from routes.logs import register_log_routes
+from routes.steam import register_steam_routes
 
 
 def _watch_config():
@@ -33,6 +34,7 @@ def create_app():
     register_instance_routes(app)
     register_config_routes(app)
     register_log_routes(app, sock)
+    register_steam_routes(app)
 
     return app
 
