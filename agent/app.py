@@ -1,63 +1,35 @@
-import yaml
 import json
-import re
-import jwt as pyjwt
-import threading
 import os
+import re
 import subprocess
-import psutil as _psutil
+import threading
 from pathlib import Path
-from flask import Flask, jsonify, request, abort
+from flask import Flask, jsonify, request
+from flask_sock import Sock
+
+import config_store
+from auth import require_jwt
+from encode_config import encode_file
+from firewall import close_ports, open_ports
+from http_helpers import error, get_instance_or_404, resolve_filename
+from log_streamer import tail_log
 from server_manager import (
     start_instance, stop_instance, restart_instance,
-    get_instance_status, get_last_config, list_configs, _running
+    get_instance_status, list_configs, _running
 )
-from encode_config import encode_file
-from flask_sock import Sock
-from log_streamer import tail_log
-from datetime import datetime, timezone
+from system_info import get_system_info
 
-# ─── Chargement config ──────────────────────────────────────────────────────────────────────────────
-
-CONFIG_PATH = Path('config.yml')
-
-def load_config():
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
-        return yaml.safe_load(f)
-
-def save_config(cfg: dict):
-    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
-        yaml.dump(cfg, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
-
-CFG         = load_config()
-GAME_CFG    = CFG['game']
-AUTH_CFG    = CFG['auth']
-HTTP_CFG    = CFG['http']
-LOGGING_CFG = CFG['logging']
-INSTANCES   = {inst['id']: inst for inst in CFG['instances']}
-
-_config_lock = threading.Lock()
-_config_mtime = CONFIG_PATH.stat().st_mtime
+# ─── Config watcher ──────────────────────────────────────────────────────────────────────────────
 
 def _watch_config():
-    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG, INSTANCES, _config_mtime
     while True:
         threading.Event().wait(1)
         try:
-            mtime = CONFIG_PATH.stat().st_mtime
-            if mtime != _config_mtime:
-                new_cfg = load_config()
-                with _config_lock:
-                    CFG         = new_cfg
-                    GAME_CFG    = new_cfg['game']
-                    AUTH_CFG    = new_cfg['auth']
-                    HTTP_CFG    = new_cfg['http']
-                    LOGGING_CFG = new_cfg['logging']
-                    INSTANCES   = {inst['id']: inst for inst in new_cfg['instances']}
-                    _config_mtime = mtime
-                print(f"[config] Rechargé — {len(INSTANCES)} instance(s)")
+            if config_store.reload_if_changed():
+                print(f"[config] Rechargé — {len(config_store.get_instances())} instance(s)")
         except Exception as e:
             print(f"[config] Erreur rechargement : {e}")
+
 
 _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
@@ -66,61 +38,6 @@ _watcher.start()
 
 _steam_process = None
 _steam_process_lock = threading.Lock()
-
-# ─── Infos système ──────────────────────────────────────────────────────────────────────────────
-
-def get_system_info() -> dict:
-    cpu_cores = _psutil.cpu_count(logical=False) or 1
-    max_instances = cpu_cores // 2
-    return {
-        'cpu_cores': cpu_cores,
-        'cpu_threads': _psutil.cpu_count(logical=True),
-        'max_instances': max_instances,
-        'current_instances': len(INSTANCES),
-    }
-
-# ─── Firewall helpers ───────────────────────────────────────────────────────────────────────────
-
-def _fw_rule_name(instance_id: str, port: int, proto: str) -> str:
-    return f"PitLane-{instance_id}-{proto}-{port}"
-
-def _open_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
-    rules = [
-        (tcp_port,  'TCP', 'jeu AC EVO TCP'),
-        (udp_port,  'UDP', 'jeu AC EVO UDP'),
-        (http_port, 'TCP', 'HTTP statut AC EVO'),
-    ]
-    errors = []
-    for port, proto, desc in rules:
-        name = _fw_rule_name(instance_id, port, proto)
-        cmd = [
-            'powershell', '-NonInteractive', '-Command',
-            f'New-NetFirewallRule -DisplayName "{name}" '
-            f'-Direction Inbound -Protocol {proto} '
-            f'-LocalPort {port} -Action Allow -ErrorAction Stop'
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            errors.append(f"{proto}/{port}: {result.stderr.strip()}")
-    return errors
-
-def _close_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
-    rules = [
-        (tcp_port,  'TCP'),
-        (udp_port,  'UDP'),
-        (http_port, 'TCP'),
-    ]
-    errors = []
-    for port, proto in rules:
-        name = _fw_rule_name(instance_id, port, proto)
-        cmd = [
-            'powershell', '-NonInteractive', '-Command',
-            f'Remove-NetFirewallRule -DisplayName "{name}" -ErrorAction SilentlyContinue'
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            errors.append(f"{proto}/{port}: {result.stderr.strip()}")
-    return errors
 
 # ─── VDF helpers ──────────────────────────────────────────────────────────────────────────────
 
@@ -152,14 +69,12 @@ sock = Sock(app)
 
 @sock.route('/api/instances/<instance_id>/logs/stream')
 def logs_stream(ws, instance_id):
-    with _config_lock:
-        known = instance_id in INSTANCES
-    if not known:
+    if not config_store.has_instance(instance_id):
         ws.send('{"error": "Instance introuvable"}')
         return
 
-    logs_path = Path(LOGGING_CFG['logs_path'])
-    max_lines = LOGGING_CFG.get('max_lines', 500)
+    logs_path = Path(config_store.LOGGING_CFG['logs_path'])
+    max_lines = config_store.LOGGING_CFG.get('max_lines', 500)
 
     log_files = sorted(logs_path.glob(f"log_{instance_id}_*.log"), reverse=True)
     if not log_files:
@@ -170,44 +85,6 @@ def logs_stream(ws, instance_id):
         tail_log(ws, str(log_files[0]), max_lines)
     except Exception:
         pass
-
-# ─── Auth JWT ─────────────────────────────────────────────────────────────────────────────
-
-def require_jwt():
-    auth_header = request.headers.get('Authorization', '')
-    if not auth_header.startswith('Bearer '):
-        abort(401, 'Token manquant')
-    token = auth_header[7:]
-    try:
-        pyjwt.decode(
-            token,
-            AUTH_CFG['jwt_secret'],
-            algorithms=[AUTH_CFG['jwt_algorithm']],
-            leeway=30
-        )
-    except pyjwt.ExpiredSignatureError:
-        abort(401, 'Token expiré')
-    except pyjwt.InvalidTokenError:
-        abort(401, 'Token invalide')
-
-# ─── Helpers ────────────────────────────────────────────────────────────────────────────────
-
-def get_instance_or_404(instance_id: str) -> dict:
-    with _config_lock:
-        inst = INSTANCES.get(instance_id)
-    if not inst:
-        abort(404, f"Instance '{instance_id}' introuvable dans config.yml")
-    return inst
-
-def error(msg: str, code: int = 400):
-    return jsonify({'error': msg}), code
-
-def resolve_filename(instance_id: str, body: dict) -> str | None:
-    filename = body.get('filename')
-    if filename:
-        return filename
-    last = get_last_config(instance_id)
-    return last.get('config')
 
 # ─── Système ─────────────────────────────────────────────────────────────────────────────────
 
@@ -221,20 +98,18 @@ def system_info():
 @app.route('/api/instances', methods=['GET'])
 def list_instances():
     require_jwt()
-    with _config_lock:
-        insts = list(INSTANCES.values())
-    statuses = [get_instance_status(inst) for inst in insts]
+    statuses = [get_instance_status(inst) for inst in config_store.get_instances()]
     return jsonify(statuses)
 
 @app.route('/api/instances', methods=['POST'])
 def create_instance():
-    global _config_mtime
     require_jwt()
     body = request.get_json(silent=True) or {}
 
     required = ['id', 'name', 'tcp_port', 'udp_port', 'http_port']
     for field in required:
-        if not body.get(field):            return error(f"Champ '{field}' requis")
+        if not body.get(field):
+            return error(f"Champ '{field}' requis")
 
     info = get_system_info()
     if info['current_instances'] >= info['max_instances']:
@@ -244,17 +119,15 @@ def create_instance():
         )
 
     instance_id = str(body['id']).strip()
-    with _config_lock:
-        if instance_id in INSTANCES:
-            return error(f"Instance '{instance_id}' existe déjà")
+    if config_store.has_instance(instance_id):
+        return error(f"Instance '{instance_id}' existe déjà")
 
     new_ports = {int(body['tcp_port']), int(body['udp_port']), int(body['http_port'])}
-    with _config_lock:
-        for inst in INSTANCES.values():
-            existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
-            conflict = new_ports & existing_ports
-            if conflict:
-                return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
+    for inst in config_store.get_instances():
+        existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
+        conflict = new_ports & existing_ports
+        if conflict:
+            return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
 
     new_inst = {
         'id':        instance_id,
@@ -264,20 +137,18 @@ def create_instance():
         'http_port': int(body['http_port']),
     }
 
-    fw_errors = _open_ports(
+    fw_errors = open_ports(
         instance_id,
         int(body['tcp_port']),
         int(body['udp_port']),
         int(body['http_port']),
     )
 
-    cfg = load_config()
+    cfg = config_store.load_config()
     cfg['instances'].append(new_inst)
-    save_config(cfg)
-
-    with _config_lock:
-        INSTANCES[instance_id] = new_inst
-        _config_mtime = CONFIG_PATH.stat().st_mtime
+    config_store.save_config(cfg)
+    config_store.set_instance(instance_id, new_inst)
+    config_store.mark_saved()
 
     response = {**new_inst}
     if fw_errors:
@@ -286,20 +157,16 @@ def create_instance():
 
 @app.route('/api/instances/<instance_id>', methods=['PUT'])
 def update_instance(instance_id):
-    global _config_mtime
     require_jwt()
 
-    with _config_lock:
-        if instance_id not in INSTANCES:
-            return error(f"Instance '{instance_id}' introuvable", 404)
+    if not config_store.has_instance(instance_id):
+        return error(f"Instance '{instance_id}' introuvable", 404)
 
     if instance_id in _running and _running[instance_id]['process'].poll() is None:
         return error("Arrêtez l'instance avant de la modifier", 409)
 
     body = request.get_json(silent=True) or {}
-
-    with _config_lock:
-        old_inst = INSTANCES[instance_id].copy()
+    old_inst = config_store.get_instance(instance_id).copy()
 
     new_inst = {
         'id':        instance_id,
@@ -313,27 +180,24 @@ def update_instance(instance_id):
     old_ports = {old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port']}
 
     if new_ports != old_ports:
-        with _config_lock:
-            for iid, inst in INSTANCES.items():
-                if iid == instance_id:
-                    continue
-                existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
-                conflict = new_ports & existing_ports
-                if conflict:
-                    return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
+        for iid, inst in config_store.INSTANCES.items():
+            if iid == instance_id:
+                continue
+            existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
+            conflict = new_ports & existing_ports
+            if conflict:
+                return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
 
-        _close_ports(instance_id, old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port'])
-        fw_errors = _open_ports(instance_id, new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port'])
+        close_ports(instance_id, old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port'])
+        fw_errors = open_ports(instance_id, new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port'])
     else:
         fw_errors = []
 
-    cfg = load_config()
+    cfg = config_store.load_config()
     cfg['instances'] = [new_inst if i['id'] == instance_id else i for i in cfg['instances']]
-    save_config(cfg)
-
-    with _config_lock:
-        INSTANCES[instance_id] = new_inst
-        _config_mtime = CONFIG_PATH.stat().st_mtime
+    config_store.save_config(cfg)
+    config_store.set_instance(instance_id, new_inst)
+    config_store.mark_saved()
 
     response = {**new_inst}
     if fw_errors:
@@ -343,27 +207,22 @@ def update_instance(instance_id):
 
 @app.route('/api/instances/<instance_id>', methods=['DELETE'])
 def delete_instance(instance_id):
-    global _config_mtime
     require_jwt()
-    with _config_lock:
-        if instance_id not in INSTANCES:
-            return error(f"Instance '{instance_id}' introuvable", 404)
+    if not config_store.has_instance(instance_id):
+        return error(f"Instance '{instance_id}' introuvable", 404)
 
     if instance_id in _running and _running[instance_id]['process'].poll() is None:
         return error("Arrêtez l'instance avant de la supprimer", 409)
 
-    with _config_lock:
-        inst_data = INSTANCES.get(instance_id, {})
+    inst_data = config_store.get_instance(instance_id) or {}
 
-    cfg = load_config()
+    cfg = config_store.load_config()
     cfg['instances'] = [i for i in cfg['instances'] if i['id'] != instance_id]
-    save_config(cfg)
+    config_store.save_config(cfg)
+    config_store.remove_instance(instance_id)
+    config_store.mark_saved()
 
-    with _config_lock:
-        INSTANCES.pop(instance_id, None)
-        _config_mtime = CONFIG_PATH.stat().st_mtime
-
-    fw_errors = _close_ports(
+    fw_errors = close_ports(
         instance_id,
         inst_data.get('tcp_port', 0),
         inst_data.get('udp_port', 0),
@@ -394,7 +253,7 @@ def instance_start(instance_id):
     if not filename:
         return error("Aucune config disponible — chargez d'abord une config via \"Charger\"")
 
-    config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
+    config_path = Path(config_store.GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
         return error(f"Config '{filename}' introuvable", 404)
 
@@ -403,7 +262,7 @@ def instance_start(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = start_instance(inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+    result = start_instance(inst, config_store.GAME_CFG, config_store.LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     if 'error' in result:
         return jsonify(result), 409
     return jsonify(result)
@@ -429,7 +288,7 @@ def instance_restart(instance_id):
     if not filename:
         return error("Aucune config disponible — chargez d'abord une config via \"Charger\"")
 
-    config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
+    config_path = Path(config_store.GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
         return error(f"Config '{filename}' introuvable", 404)
 
@@ -438,7 +297,7 @@ def instance_restart(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = restart_instance(instance_id, inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+    result = restart_instance(instance_id, inst, config_store.GAME_CFG, config_store.LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify(result)
 
 # ─── Configs ──────────────────────────────────────────────────────────────────────────────────
@@ -446,7 +305,7 @@ def instance_restart(instance_id):
 @app.route('/api/configs', methods=['GET'])
 def configs_list():
     require_jwt()
-    return jsonify(list_configs(GAME_CFG['configs_path']))
+    return jsonify(list_configs(config_store.GAME_CFG['configs_path']))
 
 
 @app.route('/api/configs', methods=['POST'])
@@ -460,7 +319,7 @@ def config_create():
     if not filename.endswith('.json'):
         return error('Le fichier doit être un .json')
 
-    dest = Path(GAME_CFG['configs_path']) / filename
+    dest = Path(config_store.GAME_CFG['configs_path']) / filename
     if dest.exists():
         return error(f"'{filename}' existe déjà — utilisez PUT pour modifier")
 
@@ -476,7 +335,7 @@ def config_update(filename):
         return error('content requis')
 
     safe_name = Path(filename).name
-    dest = Path(GAME_CFG['configs_path']) / safe_name
+    dest = Path(config_store.GAME_CFG['configs_path']) / safe_name
     if not dest.exists():
         return error(f"'{safe_name}' introuvable"), 404
 
@@ -488,7 +347,7 @@ def config_update(filename):
 def config_delete(filename):
     require_jwt()
     safe_name = Path(filename).name
-    dest = Path(GAME_CFG['configs_path']) / safe_name
+    dest = Path(config_store.GAME_CFG['configs_path']) / safe_name
     if not dest.exists():
         return error(f"'{safe_name}' introuvable"), 404
 
@@ -506,7 +365,7 @@ def instance_switch(instance_id):
     if not filename:
         return error('filename requis')
 
-    config_path = Path(GAME_CFG['configs_path']) / Path(filename).name
+    config_path = Path(config_store.GAME_CFG['configs_path']) / Path(filename).name
     if not config_path.exists():
         return error(f"Config '{filename}' introuvable", 404)
 
@@ -515,7 +374,7 @@ def instance_switch(instance_id):
     except Exception as e:
         return error(f"Erreur encodage config : {e}")
 
-    result = restart_instance(instance_id, inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+    result = restart_instance(instance_id, inst, config_store.GAME_CFG, config_store.LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify({**result, 'loaded_config': filename})
 
 # ─── Logs ────────────────────────────────────────────────────────────────────────────────────
@@ -525,8 +384,8 @@ def instance_logs(instance_id):
     require_jwt()
     get_instance_or_404(instance_id)
 
-    logs_path = Path(LOGGING_CFG['logs_path'])
-    max_lines = LOGGING_CFG.get('max_lines', 500)
+    logs_path = Path(config_store.LOGGING_CFG['logs_path'])
+    max_lines = config_store.LOGGING_CFG.get('max_lines', 500)
 
     log_files = sorted(logs_path.glob(f"log_{instance_id}_*.log"), reverse=True)
     if not log_files:
@@ -542,9 +401,8 @@ def steam_update():
     global _steam_process
     require_jwt()
 
-    with _config_lock:
-        steam_cfg = CFG.get('steam', {})
-        logs_path = LOGGING_CFG['logs_path']
+    steam_cfg = config_store.CFG.get('steam', {})
+    logs_path = config_store.LOGGING_CFG['logs_path']
 
     steamcmd_path = steam_cfg.get('steamcmd_path', '')
     if not steamcmd_path:
@@ -578,9 +436,6 @@ def steam_update():
         '+quit',
     ]
 
-    # Use PIPE + drain thread so we can flush incrementally to the log file.
-    # steamcmd buffers its output when not connected to a TTY; we still get
-    # the full output as soon as each internal flush occurs.
     create_flags = 0x08000000 if os.name == 'nt' else 0  # CREATE_NO_WINDOW
     process = subprocess.Popen(
         cmd,
@@ -610,18 +465,12 @@ def steam_update():
 def steam_update_logs():
     require_jwt()
 
-    with _config_lock:
-        logs_path = LOGGING_CFG['logs_path']
-
-    log_path = Path(logs_path) / 'steam_update.log'
+    log_path = Path(config_store.LOGGING_CFG['logs_path']) / 'steam_update.log'
     if not log_path.exists():
         return jsonify({'lines': [], 'finished': True, 'success': False})
 
     raw = log_path.read_bytes()
     text = raw.decode('utf-8', errors='replace')
-    # steamcmd uses \r to overwrite progress lines in a terminal.
-    # For each \n-delimited line, keep only the last \r-segment so the UI
-    # shows the final state of each progress line rather than raw escape chars.
     lines = [line.split('\r')[-1] for line in text.split('\n')][-100:]
 
     with _steam_process_lock:
@@ -643,8 +492,7 @@ def steam_update_check():
     """
     require_jwt()
 
-    with _config_lock:
-        steam_cfg = CFG.get('steam', {})
+    steam_cfg = config_store.CFG.get('steam', {})
 
     steamcmd_path = steam_cfg.get('steamcmd_path', '')
     if not steamcmd_path:
@@ -691,8 +539,6 @@ def steam_update_check():
     except Exception as e:
         return error(f"steamcmd erreur : {e}", 502)
 
-    # Navigate branches > public using brace-counting to avoid matching
-    # the "public" manifest blocks inside each depot's "manifests" section.
     branches_block = _vdf_block(output, 'branches')
     if not branches_block:
         return error('Section "branches" introuvable dans la sortie steamcmd', 502)
@@ -719,5 +565,5 @@ def steam_update_check():
 
 if __name__ == '__main__':
     from waitress import serve
-    print(f"PitLane Server Agent démarré sur {HTTP_CFG['host']}:{HTTP_CFG['port']}")
-    serve(app, host=HTTP_CFG['host'], port=HTTP_CFG['port'])
+    print(f"PitLane Server Agent démarré sur {config_store.HTTP_CFG['host']}:{config_store.HTTP_CFG['port']}")
+    serve(app, host=config_store.HTTP_CFG['host'], port=config_store.HTTP_CFG['port'])
