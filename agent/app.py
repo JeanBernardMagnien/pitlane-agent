@@ -596,15 +596,16 @@ def steam_update_logs():
 
     log_path = Path(logs_path) / 'steam_update.log'
     if not log_path.exists():
-        return jsonify({'lines': [], 'finished': True})
+        return jsonify({'lines': [], 'finished': True, 'success': False})
 
     lines = log_path.read_text(encoding='utf-8', errors='replace').splitlines()[-100:]
 
     with _steam_process_lock:
         proc = _steam_process.get('process') if _steam_process else None
-        finished = proc is None or proc.poll() is not None
+        exit_code = proc.poll() if proc is not None else None
+        finished = proc is None or exit_code is not None
 
-    return jsonify({'lines': lines, 'finished': finished})
+    return jsonify({'lines': lines, 'finished': finished, 'success': finished and exit_code == 0})
 
 
 @app.route('/api/steam/update-check', methods=['POST'])
