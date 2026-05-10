@@ -6,8 +6,6 @@ import threading
 import os
 import subprocess
 import psutil as _psutil
-import urllib.request
-import urllib.parse
 from pathlib import Path
 from flask import Flask, jsonify, request, abort
 from server_manager import (
@@ -19,7 +17,7 @@ from flask_sock import Sock
 from log_streamer import tail_log
 from datetime import datetime, timezone
 
-# ─── Chargement config ────────────────────────────────────────────────────────
+# ─── Chargement config ──────────────────────────────────────────────────────────────────────────────
 
 CONFIG_PATH = Path('config.yml')
 
@@ -42,7 +40,6 @@ _config_lock = threading.Lock()
 _config_mtime = CONFIG_PATH.stat().st_mtime
 
 def _watch_config():
-    """Thread de surveillance — recharge config.yml si modifié."""
     global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG, INSTANCES, _config_mtime
     while True:
         threading.Event().wait(1)
@@ -65,12 +62,12 @@ def _watch_config():
 _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
 
-# ─── Steam update process tracker ─────────────────────────────────────────────
+# ─── Steam update process tracker ───────────────────────────────────────────────────────
 
 _steam_process = None
 _steam_process_lock = threading.Lock()
 
-# ─── Infos système ────────────────────────────────────────────────────────────
+# ─── Infos système ──────────────────────────────────────────────────────────────────────────────
 
 def get_system_info() -> dict:
     cpu_cores = _psutil.cpu_count(logical=False) or 1
@@ -82,13 +79,12 @@ def get_system_info() -> dict:
         'current_instances': len(INSTANCES),
     }
 
-# ─── Firewall helpers ─────────────────────────────────────────────────────────
+# ─── Firewall helpers ───────────────────────────────────────────────────────────────────────────
 
 def _fw_rule_name(instance_id: str, port: int, proto: str) -> str:
     return f"PitLane-{instance_id}-{proto}-{port}"
 
 def _open_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
-    """Ouvre les ports nécessaires dans le firewall Windows."""
     rules = [
         (tcp_port,  'TCP', 'jeu AC EVO TCP'),
         (udp_port,  'UDP', 'jeu AC EVO UDP'),
@@ -109,7 +105,6 @@ def _open_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
     return errors
 
 def _close_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int):
-    """Supprime les règles firewall de l'instance."""
     rules = [
         (tcp_port,  'TCP'),
         (udp_port,  'UDP'),
@@ -127,12 +122,12 @@ def _close_ports(instance_id: str, tcp_port: int, udp_port: int, http_port: int)
             errors.append(f"{proto}/{port}: {result.stderr.strip()}")
     return errors
 
-# ─── Flask ────────────────────────────────────────────────────────────────────
+# ─── Flask ──────────────────────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
 sock = Sock(app)
 
-# ─── WebSocket Logs ───────────────────────────────────────────────────────────
+# ─── WebSocket Logs ───────────────────────────────────────────────────────────────────────
 
 @sock.route('/api/instances/<instance_id>/logs/stream')
 def logs_stream(ws, instance_id):
@@ -155,7 +150,7 @@ def logs_stream(ws, instance_id):
     except Exception:
         pass
 
-# ─── Auth JWT ─────────────────────────────────────────────────────────────────
+# ─── Auth JWT ─────────────────────────────────────────────────────────────────────────────
 
 def require_jwt():
     auth_header = request.headers.get('Authorization', '')
@@ -174,7 +169,7 @@ def require_jwt():
     except pyjwt.InvalidTokenError:
         abort(401, 'Token invalide')
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
 def get_instance_or_404(instance_id: str) -> dict:
     with _config_lock:
@@ -193,14 +188,14 @@ def resolve_filename(instance_id: str, body: dict) -> str | None:
     last = get_last_config(instance_id)
     return last.get('config')
 
-# ─── Système ──────────────────────────────────────────────────────────────────
+# ─── Système ─────────────────────────────────────────────────────────────────────────────────
 
 @app.route('/api/system', methods=['GET'])
 def system_info():
     require_jwt()
     return jsonify(get_system_info())
 
-# ─── Instances — CRUD ─────────────────────────────────────────────────────────
+# ─── Instances — CRUD ───────────────────────────────────────────────────────────────────
 
 @app.route('/api/instances', methods=['GET'])
 def list_instances():
@@ -360,7 +355,7 @@ def delete_instance(instance_id):
         response['fw_warnings'] = fw_errors
     return jsonify(response)
 
-# ─── Instances — Actions ──────────────────────────────────────────────────────
+# ─── Instances — Actions ───────────────────────────────────────────────────────────────────
 
 @app.route('/api/instances/<instance_id>/status', methods=['GET'])
 def instance_status(instance_id):
@@ -426,7 +421,7 @@ def instance_restart(instance_id):
     result = restart_instance(instance_id, inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify(result)
 
-# ─── Configs ──────────────────────────────────────────────────────────────────
+# ─── Configs ──────────────────────────────────────────────────────────────────────────────────
 
 @app.route('/api/configs', methods=['GET'])
 def configs_list():
@@ -503,7 +498,7 @@ def instance_switch(instance_id):
     result = restart_instance(instance_id, inst, GAME_CFG, LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
     return jsonify({**result, 'loaded_config': filename})
 
-# ─── Logs ─────────────────────────────────────────────────────────────────────
+# ─── Logs ────────────────────────────────────────────────────────────────────────────────────
 
 @app.route('/api/instances/<instance_id>/logs', methods=['GET'])
 def instance_logs(instance_id):
@@ -520,7 +515,7 @@ def instance_logs(instance_id):
     lines = log_files[0].read_text(encoding='utf-8', errors='replace').splitlines()
     return jsonify({'lines': lines[-max_lines:]})
 
-# ─── Steam ────────────────────────────────────────────────────────────────────
+# ─── Steam ──────────────────────────────────────────────────────────────────────────────────
 
 @app.route('/api/steam/update', methods=['POST'])
 def steam_update():
@@ -591,54 +586,82 @@ def steam_update_logs():
     return jsonify({'lines': lines, 'finished': finished})
 
 
-@app.route('/api/steam/update-check', methods=['GET'])
+@app.route('/api/steam/update-check', methods=['POST'])
 def steam_update_check():
+    """
+    Compare le build local (appmanifest) au build distant via steamcmd app_info_print.
+    Nécessite des identifiants Steam valides (le login anonymous est insuffisant).
+    """
     require_jwt()
 
     with _config_lock:
         steam_cfg = CFG.get('steam', {})
 
+    steamcmd_path = steam_cfg.get('steamcmd_path', '')
+    if not steamcmd_path:
+        return error('steamcmd non configuré', 503)
+
     appmanifest_path = steam_cfg.get('appmanifest_path', '')
     if not appmanifest_path:
         return error('Chemin appmanifest non configuré', 503)
+
+    body = request.get_json(silent=True) or {}
+    username = body.get('steam_username', '').strip()
+    password = body.get('steam_password', '').strip()
+    if not username or not password:
+        return error('steam_username et steam_password requis', 400)
 
     manifest_file = Path(appmanifest_path)
     if not manifest_file.exists():
         return error(f"appmanifest introuvable : {appmanifest_path}", 404)
 
     content = manifest_file.read_text(encoding='utf-8', errors='replace')
-    match = re.search(r'"buildid"\s+"(\d+)"', content)
-    if not match:
+    local_match = re.search(r'"buildid"\s+"(\d+)"', content)
+    if not local_match:
         return error('buildid introuvable dans appmanifest', 500)
 
-    local_buildid = int(match.group(1))
-    app_id = steam_cfg.get('app_id', 4564210)
+    local_buildid = int(local_match.group(1))
+    app_id = str(steam_cfg.get('app_id', 4564210))
 
     try:
-        params = urllib.parse.urlencode({
-            'appid': app_id,
-            'version': local_buildid,
-            'format': 'json',
-        })
-        url = f"https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/?{params}"
-        req = urllib.request.Request(url, headers={'User-Agent': 'PitLane/1.0'})
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+        result = subprocess.run(
+            [
+                steamcmd_path,
+                '+login', username, password,
+                '+app_info_update', '1',
+                '+app_info_print', app_id,
+                '+quit',
+            ],
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        output = result.stdout
+    except subprocess.TimeoutExpired:
+        return error('steamcmd timeout (90s)', 504)
     except Exception as e:
-        return error(f"Erreur API Steam : {e}", 502)
+        return error(f"steamcmd erreur : {e}", 502)
 
-    response_data = data.get('response', {})
-    up_to_date = response_data.get('up_to_date', False)
-    remote_build = response_data.get('required_version')
+    # Parse the "public" branch buildid from steamcmd VDF output
+    public_match = re.search(r'"public"\s*\{([^}]*)\}', output)
+    if not public_match:
+        return error('Section "public" introuvable dans la sortie steamcmd', 502)
+
+    remote_match = re.search(r'"buildid"\s+"(\d+)"', public_match.group(1))
+    if not remote_match:
+        return error('buildid distant introuvable dans la sortie steamcmd', 502)
+
+    remote_buildid = int(remote_match.group(1))
+    up_to_date = (local_buildid == remote_buildid)
 
     return jsonify({
-        'up_to_date': up_to_date,
-        'local_build': local_buildid,
-        'remote_build': remote_build,
+        'up_to_date':       up_to_date,
+        'local_build':      local_buildid,
+        'remote_build':     remote_buildid,
         'update_available': not up_to_date,
     })
 
-# ─── Lancement ────────────────────────────────────────────────────────────────
+# ─── Lancement ────────────────────────────────────────────────────────────────────────────────
 
 if __name__ == '__main__':
     from waitress import serve
