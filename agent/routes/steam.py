@@ -29,15 +29,30 @@ def _vdf_block(text: str, key: str, start: int = 0) -> str | None:
         pos += 1
     return text[start + m.end(): pos - 1]
 
-
 def _read_steam_log(log_path: Path) -> list[str]:
     if not log_path.exists():
         return []
 
     raw = log_path.read_bytes()
-    text = raw.decode('utf-8', errors='replace')
-    return [line.split('\r')[-1] for line in text.split('\n')][-100:]
+    if not raw:
+        return []
 
+    for encoding in ('utf-8', 'cp850', 'cp1252'):
+        try:
+            text = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        text = raw.decode('utf-8', errors='replace')
+
+    lines = []
+    for line in text.replace('\r', '\n').split('\n'):
+        line = line.strip()
+        if line:
+            lines.append(line)
+
+    return lines[-100:]
 
 def register_steam_routes(app):
     @app.route('/api/steam/update-check', methods=['POST'])
@@ -140,7 +155,6 @@ def register_steam_routes(app):
         logs_dir = Path(logs_path)
         logs_dir.mkdir(parents=True, exist_ok=True)
         log_path = logs_dir / 'steam_update.log'
-        log_path.write_text('', encoding='utf-8')
         steamcmd_dir = str(Path(steamcmd_path).parent)
 
         cmd = [
@@ -160,7 +174,7 @@ def register_steam_routes(app):
         )
 
         def _drain(proc, path):
-            with open(path, 'ab') as f:
+            with open(path, 'wb') as f:
                 while True:
                     chunk = proc.stdout.read(256)
                     if not chunk:
@@ -170,11 +184,7 @@ def register_steam_routes(app):
 
         threading.Thread(target=_drain, args=(process, str(log_path)), daemon=True).start()
         with _steam_process_lock:
-            _steam_process = {
-                'process': process,
-                'pid': process.pid,
-                'log_path': str(log_path),
-            }
+            _steam_process = {'process': process}
 
         return jsonify({'status': 'started', 'pid': process.pid}), 202
 
@@ -182,31 +192,56 @@ def register_steam_routes(app):
     def steam_update_logs():
         require_jwt()
 
-        default_log_path = Path(config_store.LOGGING_CFG['logs_path']) / 'steam_update.log'
+        try:
+            default_log_path = Path(config_store.LOGGING_CFG['logs_path']) / 'steam_update.log'
 
-        with _steam_process_lock:
-            steam_state = _steam_process.copy() if _steam_process else None
+            with _steam_process_lock:
+                steam_state = _steam_process.copy() if _steam_process else {}
 
-        log_path = Path(steam_state.get('log_path')) if steam_state and steam_state.get('log_path') else default_log_path
-        lines = _read_steam_log(log_path)
+            log_path = Path(steam_state.get('log_path') or default_log_path)
 
-        proc = steam_state.get('process') if steam_state else None
-        if proc is not None:
-            exit_code = proc.poll()
-            finished = exit_code is not None
-            success = finished and exit_code == 0
-            running = not finished
-        else:
-            exit_code = None
-            finished = True
-            success = False
-            running = False
+            try:
+                lines = _read_steam_log(log_path)
+                log_size = log_path.stat().st_size if log_path.exists() else 0
+            except Exception as e:
+                return jsonify({
+                    'lines': [f'Erreur lecture log: {e}'],
+                    'finished': False,
+                    'running': True,
+                    'success': False,
+                    'exit_code': None,
+                    'pid': steam_state.get('pid'),
+                    'log_path': str(log_path),
+                    'log_size': None,
+                })
 
-        return jsonify({
-            'lines': lines,
-            'finished': finished,
-            'running': running,
-            'success': success,
-            'exit_code': exit_code,
-            'pid': steam_state.get('pid') if steam_state else None,
-        })
+            proc = steam_state.get('process')
+            if proc is not None:
+                exit_code = proc.poll()
+                finished = exit_code is not None
+                success = finished and exit_code == 0
+                running = not finished
+            else:
+                exit_code = None
+                finished = True
+                success = False
+                running = False
+
+            return jsonify({
+                'lines': lines,
+                'finished': finished,
+                'running': running,
+                'success': success,
+                'exit_code': exit_code,
+                'pid': steam_state.get('pid'),
+            })
+
+        except Exception as e:
+            return jsonify({
+                'lines': [f'Erreur route logs: {e}'],
+                'finished': True,
+                'running': False,
+                'success': False,
+                'exit_code': None,
+                'pid': steam_state.get('pid') if steam_state else None,
+            }), 500
