@@ -152,28 +152,22 @@ def register_steam_routes(app):
         ]
 
         create_flags = 0x08000000 if os.name == 'nt' else 0
+        log_file = open(log_path, 'ab', buffering=0)
+
         process = subprocess.Popen(
             cmd,
-            stdout=subprocess.PIPE,
+            stdout=log_file,
             stderr=subprocess.STDOUT,
             creationflags=create_flags,
         )
 
-        def _drain(proc, path):
-            with open(path, 'ab') as f:
-                while True:
-                    chunk = proc.stdout.read(256)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    f.flush()
-
-        threading.Thread(target=_drain, args=(process, str(log_path)), daemon=True).start()
         with _steam_process_lock:
             _steam_process = {
                 'process': process,
                 'pid': process.pid,
                 'log_path': str(log_path),
+                'log_file': log_file,
+                'log_closed': False,
             }
 
         return jsonify({'status': 'started', 'pid': process.pid}), 202
@@ -191,11 +185,15 @@ def register_steam_routes(app):
         lines = _read_steam_log(log_path)
 
         proc = steam_state.get('process') if steam_state else None
-        if proc is not None:
-            exit_code = proc.poll()
-            finished = exit_code is not None
-            success = finished and exit_code == 0
-            running = not finished
+        if finished and steam_state.get('log_file') and not steam_state.get('log_closed'):
+            try:
+                steam_state['log_file'].close()
+            except Exception:
+                pass
+
+            with _steam_process_lock:
+                if _steam_process:
+                    _steam_process['log_closed'] = True
         else:
             exit_code = None
             finished = True
