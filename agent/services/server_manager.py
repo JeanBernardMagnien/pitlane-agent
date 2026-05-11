@@ -2,7 +2,6 @@ import subprocess
 import psutil
 import time
 import urllib.request
-import urllib.error
 import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
