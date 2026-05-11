@@ -1,4 +1,5 @@
-import sys, json, zlib, base64, struct
+import sys, json, zlib, base64
+
 
 def _encode(data):
     json_str = json.dumps(data, indent=2, ensure_ascii=False).replace('\n', '\r\n')
@@ -9,11 +10,8 @@ def _encode(data):
     return base64.b64encode(header + compressed).decode('ascii')
 
 
-def encode_file(filepath: str) -> tuple[str, str]:
-    """Prend un fichier JSON maître, retourne (serverconfig_b64, seasondefinition_b64)."""
-    with open(filepath, 'r', encoding='utf-8') as f:
-        cfg = json.load(f)
-
+def encode_payload(cfg: dict) -> tuple[str, str]:
+    """Prend un payload JSON maître, retourne (serverconfig_b64, seasondefinition_b64)."""
     server = cfg['Server']
     cars = [{"car_name": c['name'], "ballast": 0, "restrictor": 0.0} for c in cfg['Event']['Cars'] if c['IsSelected']]
     track_parts = cfg['Event']['SelectedTrackValue'].split('|')
@@ -73,6 +71,14 @@ def encode_file(filepath: str) -> tuple[str, str]:
     }
 
     return _encode(server_config), _encode(season_def)
+
+
+def encode_file(filepath: str) -> tuple[str, str]:
+    """Prend un fichier JSON maître, retourne (serverconfig_b64, seasondefinition_b64)."""
+    with open(filepath, 'r', encoding='utf-8') as f:
+        cfg = json.load(f)
+
+    return encode_payload(cfg)
 
 
 if __name__ == '__main__':
