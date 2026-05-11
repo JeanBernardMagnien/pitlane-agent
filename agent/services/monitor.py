@@ -31,7 +31,7 @@ class SnapshotMonitor:
 
     def _run(self, on_change):
         while not self._stop_event.wait(self.interval):
-            instances = list(config_store.get_instances().values())
+            instances = config_store.get_instances()
             snapshot = build_instances_snapshot(instances)
             snapshot_hash = self._hash_snapshot(snapshot)
 
