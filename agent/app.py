@@ -12,6 +12,7 @@ from routes.logs import register_log_routes
 from routes.steam import register_steam_routes
 from services.hub_client import post_json
 from services.monitor import SnapshotMonitor
+from services.snapshot_builder import build_instances_snapshot
 
 _monitor = None
 
@@ -52,7 +53,10 @@ def _start_monitor():
 
     _monitor = SnapshotMonitor(interval=interval)
     _monitor.start(on_change=push_state)
-    push_state(_monitor.snapshot())
+
+    initial_snapshot = build_instances_snapshot(config_store.get_instances())
+    push_state(initial_snapshot)
+
     print(f'[monitor] Hub push enabled every {interval}s -> {target_url}')
 
 
