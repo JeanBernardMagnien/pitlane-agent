@@ -20,6 +20,11 @@ steam:
   app_id: 4564210
   appmanifest_path: __APPMANIFEST_PATH__
 
+hub:
+  base_url: https://pitlane-evo.fr
+  state_endpoint: /api/agent/instances/state
+  monitor_interval: 5
+
 instances:
   - id: server1
     name: Serveur 1
