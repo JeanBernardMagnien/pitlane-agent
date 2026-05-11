@@ -69,6 +69,8 @@ Après installation, le fichier principal est :
 agent/config.yml
 ```
 
+Les chemins du jeu, SteamCMD, configs, logs et résultats sont remplis automatiquement par les scripts d'installation.
+
 Champs importants :
 
 | Clé | Description |
@@ -182,7 +184,8 @@ Body JSON requis :
 { "steam_username": "...", "steam_password": "..." }
 ```
 
-Les credentials ne sont jamais écrits sur le disque.
+Les credentials Steam restent stockés côté hub. Le hub les transmet à l'agent uniquement le temps de lancer la commande SteamCMD. L'agent ne les stocke pas sur le disque.
+
 Réponses : `202 { status, pid }` | `409` (instances en cours) | `503` (steamcmd non configuré)
 
 ### `/api/steam/update/logs` — détail
@@ -210,6 +213,8 @@ Body JSON requis :
 { "steam_username": "...", "steam_password": "..." }
 ```
 
+Les credentials Steam restent stockés côté hub. Le hub les transmet à l'agent uniquement le temps de vérifier le build distant.
+
 Réponse :
 
 ```json
@@ -221,7 +226,7 @@ Réponse :
 ### Via le hub (recommandé)
 
 Depuis le dashboard serveur, cliquer sur "Mettre à jour AC EVO".
-Les credentials Steam sont transmis à l'agent le temps de la commande et ne sont pas écrits sur le disque.
+Les credentials Steam sont configurés côté hub (`.env`) et transmis temporairement à l'agent pour exécuter SteamCMD.
 
 ### Manuellement
 
