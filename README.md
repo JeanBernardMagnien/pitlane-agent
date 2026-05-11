@@ -1,7 +1,8 @@
 # PitLane Agent
 
 Agent léger installé sur chaque serveur Windows de jeu Assetto Corsa EVO.
-Expose une API REST + WebSocket consommée par le hub PitLane (Symfony).
+
+Il expose une API REST + WebSocket consommée par le hub PitLane, et pousse aussi l'état runtime des instances vers le hub.
 
 ## Prérequis
 
@@ -43,31 +44,102 @@ Les deux scripts installent automatiquement :
 ```
 pitlane-agent/
 ├── agent/                        ← code Python de l'agent
-│   ├── app.py
-│   ├── server_manager.py
-│   ├── encode_config.py
-│   ├── log_streamer.py
-│   ├── requirements.txt
-│   └── config.example.yml
+│   ├── app.py                    ← bootstrap Flask + routes + monitor
+│   ├── config.template.yml       ← template utilisé par les installateurs
+│   ├── core/                     ← config, auth, helpers communs
+│   ├── routes/                   ← endpoints REST/WebSocket
+│   ├── services/                 ← logique métier/runtime
+│   └── requirements.txt
 ├── installers/
 │   ├── setup-agent.ps1           ← install si AC EVO déjà présent
 │   └── setup-full.ps1            ← install complète depuis zéro
+├── tools/
+│   └── uninstaller.ps1
 ├── .github/
 │   └── workflows/
-│       └── release.yml             ← publie agent.zip sur chaque tag v*
+│       └── release.yml           ← publie agent.zip sur chaque tag v*
 └── README.md
 ```
 
 ## Configuration
 
-Après installation, deux champs sont à renseigner dans `agent/config.yml` :
+Après installation, le fichier principal est :
+
+```text
+agent/config.yml
+```
+
+Les chemins du jeu, SteamCMD, configs, logs et résultats sont remplis automatiquement par les scripts d'installation.
+
+Champs importants :
 
 | Clé | Description |
 |---|---|
-| `http.base_url` | URL publique du serveur |
-| `auth.jwt_secret` | Secret partagé avec le hub Symfony |
+| `http.base_url` | URL publique de l'agent serveur |
+| `auth.jwt_secret` | Secret partagé entre le hub et l'agent |
+| `hub.base_url` | URL publique du hub PitLane |
+| `hub.state_endpoint` | Endpoint hub recevant les états d'instances |
+| `hub.monitor_interval` | Intervalle local de surveillance en secondes |
 
-Les chemins du jeu et Steam sont remplis automatiquement par les scripts.
+Exemple :
+
+```yaml
+http:
+  host: 0.0.0.0
+  port: 8181
+  base_url: "http://IP_DU_SERVEUR:8181"
+
+auth:
+  jwt_secret: "TOKEN_UNIQUE_DU_SERVEUR"
+  jwt_algorithm: HS256
+
+hub:
+  base_url: https://pitlane-evo.fr
+  state_endpoint: /api/agent/instances/state
+  monitor_interval: 5
+```
+
+Le même `auth.jwt_secret` est utilisé dans les deux sens :
+
+```text
+Hub → Agent : piloter les instances
+Agent → Hub : pousser l'état runtime des instances
+```
+
+## Push d'état vers le hub
+
+L'agent surveille localement les instances et construit un snapshot runtime.
+Lorsqu'un changement est détecté, il envoie l'état au hub :
+
+```text
+POST {hub.base_url}{hub.state_endpoint}
+Authorization: Bearer <auth.jwt_secret>
+```
+
+Payload envoyé :
+
+```json
+{
+  "instances": [
+    {
+      "id": "server1",
+      "name": "Serveur 1",
+      "status": "online",
+      "pid": 1234,
+      "ram_mb": 120.7,
+      "connected_drivers": 0,
+      "active_config": "practice_nord.json",
+      "active_config_loaded_at": "2026-05-11T08:17:56Z",
+      "tcp_port": 9700,
+      "http_port": 8081,
+      "started_at": "2026-05-11T08:17:56Z"
+    }
+  ]
+}
+```
+
+Ce push réduit la dépendance au polling côté hub pour l'affichage des instances.
+Les actions `start`, `stop`, `restart`, `switch`, etc. passent encore par l'API agent.
 
 ## Structure des logs
 
@@ -79,6 +151,8 @@ logs/
 ```
 
 ## API REST
+
+Toutes les routes ci-dessous sont exposées par l'agent et consommées par le hub.
 
 | Méthode | Route | Description |
 |---|---|---|
@@ -98,29 +172,61 @@ logs/
 | POST | `/api/configs` | Créer une config |
 | PUT | `/api/configs/{filename}` | Modifier une config |
 | DELETE | `/api/configs/{filename}` | Supprimer une config |
-| **POST** | **`/api/steam/update`** | **Déclenche la mise à jour AC EVO via steamcmd** |
-| **GET** | **`/api/steam/update/logs`** | **Logs steamcmd (100 dernières lignes + finished)** |
-| **GET** | **`/api/steam/update-check`** | **Compare buildid local vs Steam (sans auth Steam)** |
+| POST | `/api/steam/update` | Déclenche la mise à jour AC EVO via steamcmd |
+| GET | `/api/steam/update/logs` | Logs steamcmd + état de fin |
+| POST | `/api/steam/update-check` | Compare buildid local vs Steam |
 
 ### `/api/steam/update` — détail
 
-Body JSON requis : `{ "steam_username": "...", "steam_password": "..." }`
+Body JSON requis :
 
-Les credentials ne sont jamais écrits sur le disque.
+```json
+{ "steam_username": "...", "steam_password": "..." }
+```
+
+Les credentials Steam restent stockés côté hub. Le hub les transmet à l'agent uniquement le temps de lancer la commande SteamCMD. L'agent ne les stocke pas sur le disque.
+
 Réponses : `202 { status, pid }` | `409` (instances en cours) | `503` (steamcmd non configuré)
+
+### `/api/steam/update/logs` — détail
+
+Réponse :
+
+```json
+{
+  "lines": [],
+  "finished": false,
+  "running": true,
+  "success": false,
+  "exit_code": null,
+  "pid": 1234
+}
+```
+
+SteamCMD peut bufferiser sa sortie : les logs peuvent apparaître surtout en fin de mise à jour.
 
 ### `/api/steam/update-check` — détail
 
-Réponse : `{ up_to_date, local_build, remote_build, update_available }`
+Body JSON requis :
 
-Appelle l'API publique Steam — aucune authentification requise.
+```json
+{ "steam_username": "...", "steam_password": "..." }
+```
+
+Les credentials Steam restent stockés côté hub. Le hub les transmet à l'agent uniquement le temps de vérifier le build distant.
+
+Réponse :
+
+```json
+{ "up_to_date": true, "local_build": 123, "remote_build": 123, "update_available": false }
+```
 
 ## Mise à jour d'AC EVO
 
 ### Via le hub (recommandé)
 
 Depuis le dashboard serveur, cliquer sur "Mettre à jour AC EVO".
-Les credentials Steam sont configurés une seule fois dans le hub (`.env`).
+Les credentials Steam sont configurés côté hub (`.env`) et transmis temporairement à l'agent pour exécuter SteamCMD.
 
 ### Manuellement
 
@@ -131,10 +237,11 @@ steamcmd.exe +login <compte_steam> <pass_steam> +force_install_dir <chemin_acevo
 
 ## Authentification
 
-Toutes les routes requièrent un token JWT dans le header :
+Toutes les routes agent requièrent un token dans le header :
 
-```
+```text
 Authorization: Bearer <token>
 ```
 
-Le secret JWT est partagé avec le hub Symfony (`auth.jwt_secret` dans `config.yml`).
+Le secret partagé est `auth.jwt_secret` dans `config.yml`.
+Il sert aussi à authentifier le push de l'agent vers le hub.
