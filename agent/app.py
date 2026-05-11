@@ -12,6 +12,7 @@ from routes.logs import register_log_routes
 from routes.steam import register_steam_routes
 from services.hub_client import post_json
 from services.monitor import SnapshotMonitor
+from services.snapshot_builder import build_instances_snapshot
 
 _monitor = None
 
@@ -41,14 +42,21 @@ def _start_monitor():
 
     target_url = f'{base_url}{endpoint}'
 
-    def on_change(snapshot):
-        payload = {'instances': snapshot}
+    def push_state(snapshot):
+        payload = {
+            'instances': snapshot,
+            'system_info': get_system_info(),
+        }
         result = post_json(target_url, payload, token=token)
         if not result.get('ok'):
             print(f"[monitor] Hub push failed: {result.get('status')} {result.get('body')}")
 
     _monitor = SnapshotMonitor(interval=interval)
-    _monitor.start(on_change=on_change)
+    _monitor.start(on_change=push_state)
+
+    initial_snapshot = build_instances_snapshot(config_store.get_instances())
+    push_state(initial_snapshot)
+
     print(f'[monitor] Hub push enabled every {interval}s -> {target_url}')
 
 
