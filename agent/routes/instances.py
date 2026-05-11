@@ -7,7 +7,8 @@ from core.auth import require_jwt
 from core.firewall import close_ports, open_ports
 from core.http_helpers import error, get_instance_or_404, resolve_filename
 from core.system_info import get_system_info
-from services.encode_config import encode_file
+from services.encode_config import encode_file, encode_payload
+from services.runtime_config_compiler import compile_event_config
 from services.server_manager import (
     _running,
     get_instance_status,
@@ -185,6 +186,42 @@ def register_instance_routes(app):
         if 'error' in result:
             return jsonify(result), 409
         return jsonify(result)
+
+    @app.route('/api/instances/<instance_id>/start-event', methods=['POST'])
+    def instance_start_event(instance_id):
+        require_jwt()
+        inst = get_instance_or_404(instance_id)
+
+        body = request.get_json(silent=True) or {}
+        event_config = body.get('event_config')
+
+        if not isinstance(event_config, dict):
+            return error('event_config requis')
+
+        try:
+            runtime_config = compile_event_config(event_config, inst)
+            serverconfig_b64, seasondefinition_b64 = encode_payload(runtime_config)
+        except Exception as e:
+            return error(f"Erreur compilation config event : {e}")
+
+        runtime_name = body.get('event_config_name') or body.get('event_config_id') or 'runtime-event'
+
+        result = start_instance(
+            inst,
+            config_store.GAME_CFG,
+            config_store.LOGGING_CFG,
+            serverconfig_b64,
+            seasondefinition_b64,
+            filename=str(runtime_name),
+        )
+
+        if 'error' in result:
+            return jsonify(result), 409
+
+        return jsonify({
+            **result,
+            'runtime_config': runtime_name,
+        })
 
     @app.route('/api/instances/<instance_id>/stop', methods=['POST'])
     def instance_stop(instance_id):
