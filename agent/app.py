@@ -26,21 +26,17 @@ def _watch_config():
             print(f"[config] Erreur rechargement : {e}")
 
 
-def _start_optional_monitor():
+def _start_monitor():
     global _monitor
 
     hub_cfg = config_store.CFG.get('hub', {})
-    if not hub_cfg.get('enabled', False):
-        print('[monitor] Hub push disabled')
-        return
-
     base_url = str(hub_cfg.get('base_url', '')).rstrip('/')
     endpoint = str(hub_cfg.get('state_endpoint', '/api/agent/instances/state'))
-    token = hub_cfg.get('token')
     interval = int(hub_cfg.get('monitor_interval', 5))
+    token = config_store.AUTH_CFG['jwt_secret']
 
     if not base_url:
-        print('[monitor] Hub push enabled but hub.base_url is empty')
+        print('[monitor] Hub push disabled: hub.base_url is empty')
         return
 
     target_url = f'{base_url}{endpoint}'
@@ -75,7 +71,7 @@ def create_app():
 
 _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
-_start_optional_monitor()
+_start_monitor()
 
 app = create_app()
 
