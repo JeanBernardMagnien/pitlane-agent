@@ -10,14 +10,45 @@ $LatestReleaseApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releas
 $TaskName = "PitLaneAgent"
 
 function Find-AcEvoServer {
+    $knownServerPaths = @(
+        "C:\SteamCMD\steamapps\common\Assetto Corsa EVO Dedicated Server",
+        "D:\SteamCMD\steamapps\common\Assetto Corsa EVO Dedicated Server",
+        "C:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server",
+        "D:\steamcmd\steamapps\common\Assetto Corsa EVO Dedicated Server",
+        "C:\Program Files (x86)\Steam\steamapps\common\Assetto Corsa EVO Dedicated Server",
+        "D:\Program Files (x86)\Steam\steamapps\common\Assetto Corsa EVO Dedicated Server"
+    )
+
+    foreach ($path in $knownServerPaths) {
+        $serverExe = Join-Path $path "AssettoCorsaEVOServer.exe"
+        $agentPath = Join-Path $path "pitlane-agent"
+
+        if ((Test-Path $serverExe) -and ((Test-Path (Join-Path $agentPath "app.py")) -or (Test-Path (Join-Path $agentPath "config.yml")))) {
+            Add-Log "AC EVO detecte dans chemin connu : $path"
+            return $path
+        }
+    }
+
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
 
     foreach ($drive in $drives) {
+        Add-Log "Recherche AssettoCorsaEVOServer.exe sur $drive ..."
+
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
-            -Recurse -Depth 6 -ErrorAction SilentlyContinue |
+            -Recurse -Depth 10 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $serverPath = $_.DirectoryName
+                $agentPath = Join-Path $serverPath "pitlane-agent"
+
+                (Test-Path (Join-Path $agentPath "app.py")) -or
+                (Test-Path (Join-Path $agentPath "config.yml"))
+            } |
             Select-Object -First 1
 
-        if ($found) { return $found.DirectoryName }
+        if ($found) {
+            Add-Log "AC EVO detecte : $($found.DirectoryName)"
+            return $found.DirectoryName
+        }
     }
 
     return $null
@@ -100,8 +131,7 @@ function Remove-AgentContent {
         "logs",
         "Results",
         "configs",
-        "tools",
-        "backups"
+        "tools"
     )
 
     Get-ChildItem -Path $AgentPath -Force -ErrorAction SilentlyContinue | ForEach-Object {
@@ -326,11 +356,22 @@ $form.Add_Shown({
 
         Set-StepStatus 3 "running"
         $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-        $backupRoot = Join-Path (Join-Path $agentPath "backups") "backup-$timestamp"
+
+        $agentParent = Split-Path $agentPath -Parent
+        $backupRoot = Join-Path $agentParent "pitlane-agent-backups\backup-$timestamp"
+
         New-Item -ItemType Directory -Path $backupRoot -Force | Out-Null
 
         Add-Log "Backup vers : $backupRoot"
-        Copy-DirectoryContent -Source $agentPath -Destination $backupRoot
+
+        Get-ChildItem -Path $agentPath -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.Name -eq "backups") {
+                return
+            }
+
+            Copy-Item -Path $_.FullName -Destination $backupRoot -Recurse -Force
+        }
+
         Backup-LocalFiles -AgentPath $agentPath -BackupPath $localBackupPath
         Set-StepStatus 3 "ok"
 
