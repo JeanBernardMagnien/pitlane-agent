@@ -119,6 +119,21 @@ function Download-Agent {
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
 }
 
+function Install-AgentUpdater {
+    param([string]$AgentPath)
+
+    $url = "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/feature/manual-agent-updater/installers/updater.exe"
+    $toolsPath = Join-Path $AgentPath "tools"
+    $updaterPath = Join-Path $toolsPath "PitLaneAgentUpdater.exe"
+
+    New-Item -ItemType Directory -Path $toolsPath -Force | Out-Null
+
+    Invoke-WebRequest `
+        -Uri $url `
+        -OutFile $updaterPath `
+        -UseBasicParsing
+}
+
 function New-JwtSecret {
     $bytes = New-Object byte[] 32
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -337,6 +352,7 @@ $form.Add_Shown({
     try {
         Add-Log "Telechargement agent vers $AgentPath"
         Download-Agent -DestinationPath $AgentPath
+        Install-AgentUpdater -AgentPath $AgentPath
         Set-StepStatus 3 "ok"
     } catch {
         Set-StepStatus 3 "error"
