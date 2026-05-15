@@ -1,14 +1,20 @@
-from pathlib import Path
-
 from flask import jsonify, request
 
 from core import config_store
 from core.auth import require_jwt
 from core.firewall import close_ports, open_ports
-from core.http_helpers import error, get_instance_or_404, resolve_filename
+from core.http_helpers import error, get_instance_or_404
 from core.system_info import get_system_info
-from services.encode_config import encode_file, encode_payload
-from services.runtime_config_compiler import compile_event_config
+from services.current_config_store import (
+    load_current_config,
+    save_current_config,
+    save_launch_history_config,
+)
+from services.encode_config import encode_payload
+from services.runtime_config_compiler import (
+    InstancePortsOutOfSync,
+    finalize_launch_config,
+)
 from services.server_manager import (
     _running,
     get_instance_status,
@@ -54,10 +60,10 @@ def register_instance_routes(app):
                 return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
 
         new_inst = {
-            'id':        instance_id,
-            'name':      str(body['name']).strip(),
-            'tcp_port':  int(body['tcp_port']),
-            'udp_port':  int(body['udp_port']),
+            'id': instance_id,
+            'name': str(body['name']).strip(),
+            'tcp_port': int(body['tcp_port']),
+            'udp_port': int(body['udp_port']),
             'http_port': int(body['http_port']),
         }
 
@@ -93,10 +99,10 @@ def register_instance_routes(app):
         old_inst = config_store.get_instance(instance_id).copy()
 
         new_inst = {
-            'id':        instance_id,
-            'name':      str(body.get('name', old_inst['name'])).strip(),
-            'tcp_port':  int(body.get('tcp_port', old_inst['tcp_port'])),
-            'udp_port':  int(body.get('udp_port', old_inst['udp_port'])),
+            'id': instance_id,
+            'name': str(body.get('name', old_inst['name'])).strip(),
+            'tcp_port': int(body.get('tcp_port', old_inst['tcp_port'])),
+            'udp_port': int(body.get('udp_port', old_inst['udp_port'])),
             'http_port': int(body.get('http_port', old_inst['http_port'])),
         }
 
@@ -107,8 +113,10 @@ def register_instance_routes(app):
             for iid, inst in config_store.INSTANCES.items():
                 if iid == instance_id:
                     continue
+
                 existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
                 conflict = new_ports & existing_ports
+
                 if conflict:
                     return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
 
@@ -126,11 +134,13 @@ def register_instance_routes(app):
         response = {**new_inst}
         if fw_errors:
             response['fw_warnings'] = fw_errors
+
         return jsonify(response)
 
     @app.route('/api/instances/<instance_id>', methods=['DELETE'])
     def delete_instance(instance_id):
         require_jwt()
+
         if not config_store.has_instance(instance_id):
             return error(f"Instance '{instance_id}' introuvable", 404)
 
@@ -153,8 +163,10 @@ def register_instance_routes(app):
         )
 
         response = {'deleted': instance_id}
+
         if fw_errors:
             response['fw_warnings'] = fw_errors
+
         return jsonify(response)
 
     @app.route('/api/instances/<instance_id>/status', methods=['GET'])
@@ -163,48 +175,51 @@ def register_instance_routes(app):
         inst = get_instance_or_404(instance_id)
         return jsonify(get_instance_status(inst))
 
-    @app.route('/api/instances/<instance_id>/start', methods=['POST'])
-    def instance_start(instance_id):
+    @app.route('/api/instances/<instance_id>/launch', methods=['POST'])
+    def instance_launch(instance_id):
         require_jwt()
+
         inst = get_instance_or_404(instance_id)
 
         body = request.get_json(silent=True) or {}
-        filename = resolve_filename(instance_id, body)
-        if not filename:
-            return error("Aucune config disponible — chargez d'abord une config via \"Charger\"")
 
-        config_path = Path(config_store.GAME_CFG['configs_path']) / Path(filename).name
-        if not config_path.exists():
-            return error(f"Config '{filename}' introuvable", 404)
+        runtime_config = body.get('runtime_config')
+        launch_id = body.get('launch_id')
 
-        try:
-            serverconfig_b64, seasondefinition_b64 = encode_file(str(config_path))
-        except Exception as e:
-            return error(f"Erreur encodage config : {e}")
-
-        result = start_instance(inst, config_store.GAME_CFG, config_store.LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
-        if 'error' in result:
-            return jsonify(result), 409
-        return jsonify(result)
-
-    @app.route('/api/instances/<instance_id>/start-event', methods=['POST'])
-    def instance_start_event(instance_id):
-        require_jwt()
-        inst = get_instance_or_404(instance_id)
-
-        body = request.get_json(silent=True) or {}
-        event_config = body.get('event_config')
-
-        if not isinstance(event_config, dict):
-            return error('event_config requis')
+        if not isinstance(runtime_config, dict):
+            return error('runtime_config requis')
 
         try:
-            runtime_config = compile_event_config(event_config, inst)
+            runtime_config = finalize_launch_config(
+                runtime_config,
+                inst,
+                config_store.GAME_CFG,
+            )
+
+            save_current_config(
+                config_store.GAME_CFG,
+                instance_id,
+                runtime_config,
+            )
+
+            save_launch_history_config(
+                config_store.GAME_CFG,
+                launch_id,
+                instance_id,
+                runtime_config,
+            )
+
             serverconfig_b64, seasondefinition_b64 = encode_payload(runtime_config)
-        except Exception as e:
-            return error(f"Erreur compilation config event : {e}")
 
-        runtime_name = body.get('event_config_name') or body.get('event_config_id') or 'runtime-event'
+        except InstancePortsOutOfSync as e:
+            return jsonify({
+                'code': 'INSTANCE_PORTS_OUT_OF_SYNC',
+                'expected': e.expected,
+                'received': e.received,
+            }), 409
+
+        except Exception as e:
+            return error(f'Erreur préparation lancement : {e}')
 
         result = start_instance(
             inst,
@@ -212,66 +227,96 @@ def register_instance_routes(app):
             config_store.LOGGING_CFG,
             serverconfig_b64,
             seasondefinition_b64,
-            filename=str(runtime_name),
+            filename=f'launch-{launch_id or "manual"}',
         )
 
         if 'error' in result:
             return jsonify(result), 409
 
+        return jsonify(result)
+
+    @app.route('/api/instances/<instance_id>/start', methods=['POST'])
+    def instance_start(instance_id):
+        require_jwt()
+
+        inst = get_instance_or_404(instance_id)
+
+        try:
+            _, runtime_config = load_current_config(
+                config_store.GAME_CFG,
+                instance_id,
+            )
+
+            serverconfig_b64, seasondefinition_b64 = encode_payload(runtime_config)
+
+        except FileNotFoundError as e:
+            return error(str(e), 404)
+
+        except Exception as e:
+            return error(f'Erreur chargement config : {e}')
+
+        result = start_instance(
+            inst,
+            config_store.GAME_CFG,
+            config_store.LOGGING_CFG,
+            serverconfig_b64,
+            seasondefinition_b64,
+            filename='current-config',
+        )
+
+        if 'error' in result:
+            return jsonify(result), 409
+
+        return jsonify(result)
+
+    @app.route('/api/instances/<instance_id>/start-event', methods=['POST'])
+    def instance_start_event(instance_id):
+        require_jwt()
+
         return jsonify({
-            **result,
-            'runtime_config': runtime_name,
-        })
+            'error': 'Deprecated route. Use /api/instances/{instance_id}/launch',
+        }), 410
 
     @app.route('/api/instances/<instance_id>/stop', methods=['POST'])
     def instance_stop(instance_id):
         require_jwt()
         get_instance_or_404(instance_id)
+
         result = stop_instance(instance_id)
+
         if 'error' in result:
             return jsonify(result), 409
+
         return jsonify(result)
 
     @app.route('/api/instances/<instance_id>/restart', methods=['POST'])
     def instance_restart(instance_id):
         require_jwt()
+
         inst = get_instance_or_404(instance_id)
 
-        body = request.get_json(silent=True) or {}
-        filename = resolve_filename(instance_id, body)
-        if not filename:
-            return error("Aucune config disponible — chargez d'abord une config via \"Charger\"")
-
-        config_path = Path(config_store.GAME_CFG['configs_path']) / Path(filename).name
-        if not config_path.exists():
-            return error(f"Config '{filename}' introuvable", 404)
-
         try:
-            serverconfig_b64, seasondefinition_b64 = encode_file(str(config_path))
-        except Exception as e:
-            return error(f"Erreur encodage config : {e}")
+            _, runtime_config = load_current_config(
+                config_store.GAME_CFG,
+                instance_id,
+            )
 
-        result = restart_instance(instance_id, inst, config_store.GAME_CFG, config_store.LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
+            serverconfig_b64, seasondefinition_b64 = encode_payload(runtime_config)
+
+        except FileNotFoundError as e:
+            return error(str(e), 404)
+
+        except Exception as e:
+            return error(f'Erreur chargement config : {e}')
+
+        result = restart_instance(
+            instance_id,
+            inst,
+            config_store.GAME_CFG,
+            config_store.LOGGING_CFG,
+            serverconfig_b64,
+            seasondefinition_b64,
+            filename='current-config',
+        )
+
         return jsonify(result)
-
-    @app.route('/api/instances/<instance_id>/switch', methods=['POST'])
-    def instance_switch(instance_id):
-        require_jwt()
-        inst = get_instance_or_404(instance_id)
-
-        body = request.get_json(silent=True) or {}
-        filename = body.get('filename')
-        if not filename:
-            return error('filename requis')
-
-        config_path = Path(config_store.GAME_CFG['configs_path']) / Path(filename).name
-        if not config_path.exists():
-            return error(f"Config '{filename}' introuvable", 404)
-
-        try:
-            serverconfig_b64, seasondefinition_b64 = encode_file(str(config_path))
-        except Exception as e:
-            return error(f"Erreur encodage config : {e}")
-
-        result = restart_instance(instance_id, inst, config_store.GAME_CFG, config_store.LOGGING_CFG, serverconfig_b64, seasondefinition_b64, filename=filename)
-        return jsonify({**result, 'loaded_config': filename})
