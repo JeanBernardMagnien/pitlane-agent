@@ -15,24 +15,35 @@ def _history_dir(game_cfg: dict) -> Path:
     return _configs_root(game_cfg) / 'history'
 
 
+def _safe_name(value: str | int | None, fallback: str) -> str:
+    raw_value = str(value or fallback).strip() or fallback
+    return Path(raw_value).name
+
+
 def current_config_path(game_cfg: dict, instance_id: str) -> Path:
-    return _current_dir(game_cfg) / f'{instance_id}.json'
+    safe_instance_id = _safe_name(instance_id, 'instance')
+    return _current_dir(game_cfg) / f'{safe_instance_id}.json'
 
 
-def history_config_path(game_cfg: dict, launch_id: str | int, instance_id: str) -> Path:
-    return _history_dir(game_cfg) / f'launch_{launch_id}_{instance_id}.json'
+def history_config_path(game_cfg: dict, launch_id: str | int | None, instance_id: str) -> Path:
+    safe_launch_id = _safe_name(launch_id, 'manual')
+    safe_instance_id = _safe_name(instance_id, 'instance')
+    return _history_dir(game_cfg) / f'launch_{safe_launch_id}_{safe_instance_id}.json'
 
 
-def save_current_config(game_cfg: dict, instance_id: str, config: dict[str, Any]) -> Path:
-    path = current_config_path(game_cfg, instance_id)
+def _write_config(path: Path, config: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     path.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2),
+        json.dumps(config, ensure_ascii=False, indent=2) + '\n',
         encoding='utf-8',
     )
 
     return path
+
+
+def save_current_config(game_cfg: dict, instance_id: str, config: dict[str, Any]) -> Path:
+    return _write_config(current_config_path(game_cfg, instance_id), config)
 
 
 def save_launch_history_config(
@@ -40,19 +51,8 @@ def save_launch_history_config(
     launch_id: str | int | None,
     instance_id: str,
     config: dict[str, Any],
-) -> Path | None:
-    if launch_id in (None, ''):
-        return None
-
-    path = history_config_path(game_cfg, launch_id, instance_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    path.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2),
-        encoding='utf-8',
-    )
-
-    return path
+) -> Path:
+    return _write_config(history_config_path(game_cfg, launch_id, instance_id), config)
 
 
 def load_current_config(game_cfg: dict, instance_id: str) -> tuple[Path, dict[str, Any]]:
@@ -61,4 +61,9 @@ def load_current_config(game_cfg: dict, instance_id: str) -> tuple[Path, dict[st
     if not path.exists():
         raise FileNotFoundError(f"Aucune config courante pour l'instance {instance_id}")
 
-    return path, json.loads(path.read_text(encoding='utf-8'))
+    config = json.loads(path.read_text(encoding='utf-8'))
+
+    if not isinstance(config, dict):
+        raise ValueError(f"La config courante de l'instance {instance_id} est invalide")
+
+    return path, config
