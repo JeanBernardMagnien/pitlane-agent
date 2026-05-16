@@ -185,6 +185,7 @@ def register_instance_routes(app):
 
         runtime_config = body.get('runtime_config')
         launch_id = body.get('launch_id')
+        restart_if_running = bool(body.get('restart_if_running', False))
 
         if not isinstance(runtime_config, dict):
             return error('runtime_config requis')
@@ -221,14 +222,25 @@ def register_instance_routes(app):
         except Exception as e:
             return error(f'Erreur préparation lancement : {e}')
 
-        result = start_instance(
-            inst,
-            config_store.GAME_CFG,
-            config_store.LOGGING_CFG,
-            serverconfig_b64,
-            seasondefinition_b64,
-            filename=f'launch-{launch_id or "manual"}',
-        )
+        if restart_if_running:
+            result = restart_instance(
+                instance_id,
+                inst,
+                config_store.GAME_CFG,
+                config_store.LOGGING_CFG,
+                serverconfig_b64,
+                seasondefinition_b64,
+                filename=f'launch-{launch_id or "manual"}',
+            )
+        else:
+            result = start_instance(
+                inst,
+                config_store.GAME_CFG,
+                config_store.LOGGING_CFG,
+                serverconfig_b64,
+                seasondefinition_b64,
+                filename=f'launch-{launch_id or "manual"}',
+            )
 
         if 'error' in result:
             return jsonify(result), 409
