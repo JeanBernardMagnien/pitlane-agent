@@ -142,15 +142,6 @@ def register_instance_routes(app):
 
         return jsonify(response)
 
-    @app.route('/api/instances', methods=['GET', 'POST'])
-    @app.route('/api/instances/<instance_id>', methods=['GET', 'PUT', 'DELETE'])
-    @app.route('/api/instances/<instance_id>/status', methods=['GET'])
-    def deprecated_instance_state_or_crud(instance_id=None):
-        require_jwt()
-        return jsonify({
-            'error': 'Deprecated route. Instances and runtime state are owned by the hub. Use command/provisioning routes only.',
-        }), 410
-
     @app.route('/api/instances/<instance_id>/launch', methods=['POST'])
     def instance_launch(instance_id):
         require_jwt()
