@@ -10,12 +10,49 @@ def _encode(data):
     return base64.b64encode(header + compressed).decode('ascii')
 
 
+def _empty_session(name: str) -> dict:
+    return {
+        "forceTimeDuration": name != "Race",
+        "TimeMultiplier": 1,
+        "IsVisible": False,
+        "Name": name,
+        "Duration": 0,
+        "Length": 0,
+        "Hour": 0,
+        "Minute": 0,
+        "MaxWaitToBox": 0,
+        "OvertimeWaitingNextSession": 0,
+        "MinWaitingForPlayers": 0,
+        "MaxWaitingForPlayers": 0,
+    }
+
+
+def _session(sessions: dict, key: str, name: str) -> dict:
+    return sessions.get(key) or _empty_session(name)
+
+
+def _time_of_day(session: dict) -> dict:
+    return {
+        "year": 2024,
+        "month": 8,
+        "day": 15,
+        "hour": session['Hour'],
+        "minute": session['Minute'],
+        "second": 0,
+        "time_multiplier": 1,
+    }
+
+
 def encode_payload(cfg: dict) -> tuple[str, str]:
     """Prend un payload JSON maître, retourne (serverconfig_b64, seasondefinition_b64)."""
     server = cfg['Server']
     cars = [{"car_name": c['name'], "ballast": 0, "restrictor": 0.0} for c in cfg['Event']['Cars'] if c['IsSelected']]
     track_parts = cfg['Event']['SelectedTrackValue'].split('|')
     sessions = cfg['Sessions']
+    practice = _session(sessions, 'PracticeSession', 'Practice')
+    qualifying = _session(sessions, 'QualifyingSession', 'Qualify')
+    warmup = _session(sessions, 'WarmupSession', 'Warmup')
+    race = _session(sessions, 'RaceSession', 'Race')
 
     server_config = {
         "server_tcp_listener_port": server['TcpPort'],
@@ -28,7 +65,7 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
         "cycle": server['IsCycleEnabled'],
         "allowed_cars_list_full": cars,
         "driver_password": server['DriverPassword'],
-        "spectator_password": "",
+        "spectator_password": server['SpectatorPassword'],
         "admin_password": server['AdminPassword'],
         "type": server['SelectedServerTypeValue'],
         "entry_list_path": server['EntryListPath'],
@@ -45,25 +82,25 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
         },
         "export_json": False,
         "game_config": {
-            "practice_duration": sessions['PracticeSession']['Length'],
-            "practice_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['PracticeSession']['Hour'], "minute": sessions['PracticeSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "practice_overtime_waiting_next_session": sessions['PracticeSession']['OvertimeWaitingNextSession'],
-            "practice_max_wait_to_box": sessions['PracticeSession']['MaxWaitToBox'],
-            "qualify_duration": sessions['QualifyingSession']['Length'],
-            "qualify_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['QualifyingSession']['Hour'], "minute": sessions['QualifyingSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "qualify_overtime_waiting_next_session": sessions['QualifyingSession']['OvertimeWaitingNextSession'],
-            "qualify_max_wait_to_box": sessions['QualifyingSession']['MaxWaitToBox'],
-            "warmup_duration": sessions['WarmupSession']['Length'],
-            "warmup_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['WarmupSession']['Hour'], "minute": sessions['WarmupSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "warmup_overtime_waiting_next_session": sessions['WarmupSession']['OvertimeWaitingNextSession'],
-            "warmup_max_wait_to_box": sessions['WarmupSession']['MaxWaitToBox'],
-            "race_duration": sessions['RaceSession']['Length'],
+            "practice_duration": practice['Length'],
+            "practice_time_of_day": _time_of_day(practice),
+            "practice_overtime_waiting_next_session": practice['OvertimeWaitingNextSession'],
+            "practice_max_wait_to_box": practice['MaxWaitToBox'],
+            "qualify_duration": qualifying['Length'],
+            "qualify_time_of_day": _time_of_day(qualifying),
+            "qualify_overtime_waiting_next_session": qualifying['OvertimeWaitingNextSession'],
+            "qualify_max_wait_to_box": qualifying['MaxWaitToBox'],
+            "warmup_duration": warmup['Length'],
+            "warmup_time_of_day": _time_of_day(warmup),
+            "warmup_overtime_waiting_next_session": warmup['OvertimeWaitingNextSession'],
+            "warmup_max_wait_to_box": warmup['MaxWaitToBox'],
+            "race_duration": race['Length'],
             "race_duration_type": "GameModeSelectionDuration_TIME",
-            "race_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['RaceSession']['Hour'], "minute": sessions['RaceSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "race_overtime_waiting_next_session": sessions['RaceSession']['OvertimeWaitingNextSession'],
-            "race_max_wait_to_box": sessions['RaceSession']['MaxWaitToBox'],
-            "min_waiting_for_players": sessions['PracticeSession']['MinWaitingForPlayers'],
-            "max_waiting_for_players": sessions['PracticeSession']['MaxWaitingForPlayers']
+            "race_time_of_day": _time_of_day(race),
+            "race_overtime_waiting_next_session": race['OvertimeWaitingNextSession'],
+            "race_max_wait_to_box": race['MaxWaitToBox'],
+            "min_waiting_for_players": practice['MinWaitingForPlayers'],
+            "max_waiting_for_players": practice['MaxWaitingForPlayers']
         },
         "weather_type": cfg['Event']['SelectedWeatherTypeValue'],
         "weather_behaviour": cfg['Event']['SelectedWeatherBehaviorValue'],
