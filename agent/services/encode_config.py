@@ -71,7 +71,12 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
     game_config = {}
     waiting_session = None
 
-    for source_key, session in sessions.items():
+    ordered_sessions = sorted(
+        sessions.items(),
+        key=lambda item: item[1].get('Order', 999)
+    )
+
+    for source_key, session in ordered_sessions:
         _apply_session(game_config, source_key, session)
         if source_key in ('RaceSession', 'PracticeSession'):
             waiting_session = session
