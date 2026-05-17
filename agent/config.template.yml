@@ -25,13 +25,6 @@ hub:
   state_endpoint: /api/agent/instances/state
   monitor_interval: 5
 
-instances:
-  - id: server1
-    name: Serveur 1
-    tcp_port: 9700
-    udp_port: 9700
-    http_port: 8081
-
 auth:
   jwt_secret: __JWT_SECRET__
   jwt_algorithm: HS256
