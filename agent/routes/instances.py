@@ -254,14 +254,6 @@ def register_instance_routes(app):
 
         return jsonify(result)
 
-    @app.route('/api/instances/<instance_id>/start-event', methods=['POST'])
-    def instance_start_event(instance_id):
-        require_jwt()
-
-        return jsonify({
-            'error': 'Deprecated route. Use /api/instances/{instance_id}/launch',
-        }), 410
-
     @app.route('/api/instances/<instance_id>/stop', methods=['POST'])
     def instance_stop(instance_id):
         require_jwt()
