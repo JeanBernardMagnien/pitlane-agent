@@ -4,17 +4,12 @@ from flask import jsonify
 
 from core import config_store
 from core.auth import require_jwt
-from core.http_helpers import get_instance_or_404
 from services.log_streamer import tail_log
 
 
 def register_log_routes(app, sock):
     @sock.route('/api/instances/<instance_id>/logs/stream')
     def logs_stream(ws, instance_id):
-        if not config_store.has_instance(instance_id):
-            ws.send('{"error": "Instance introuvable"}')
-            return
-
         logs_path = Path(config_store.LOGGING_CFG['logs_path'])
         max_lines = config_store.LOGGING_CFG.get('max_lines', 500)
 
@@ -31,7 +26,6 @@ def register_log_routes(app, sock):
     @app.route('/api/instances/<instance_id>/logs', methods=['GET'])
     def instance_logs(instance_id):
         require_jwt()
-        get_instance_or_404(instance_id)
 
         logs_path = Path(config_store.LOGGING_CFG['logs_path'])
         max_lines = config_store.LOGGING_CFG.get('max_lines', 500)

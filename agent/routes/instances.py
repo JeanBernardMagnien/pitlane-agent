@@ -3,8 +3,7 @@ from flask import jsonify, request
 from core import config_store
 from core.auth import require_jwt
 from core.firewall import close_ports, open_ports
-from core.http_helpers import error, get_instance_or_404
-from core.system_info import get_system_info
+from core.http_helpers import error
 from services.current_config_store import (
     load_current_config,
     save_current_config,
@@ -17,171 +16,141 @@ from services.runtime_config_compiler import (
 )
 from services.server_manager import (
     _running,
-    get_instance_status,
     restart_instance,
     start_instance,
     stop_instance,
 )
 
 
-def register_instance_routes(app):
-    @app.route('/api/instances', methods=['GET'])
-    def list_instances():
-        require_jwt()
-        statuses = [get_instance_status(inst) for inst in config_store.get_instances()]
-        return jsonify(statuses)
+def _instance_from_payload(body: dict, fallback_instance_id: str | None = None) -> dict | None:
+    instance = body.get('instance')
+    if not isinstance(instance, dict):
+        return None
 
-    @app.route('/api/instances', methods=['POST'])
-    def create_instance():
+    instance_id = str(instance.get('id') or fallback_instance_id or '').strip()
+    if not instance_id:
+        return None
+
+    try:
+        return {
+            'id': instance_id,
+            'name': str(instance.get('name') or instance_id).strip(),
+            'tcp_port': int(instance['tcp_port']),
+            'udp_port': int(instance['udp_port']),
+            'http_port': int(instance['http_port']),
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _ports_from_payload(body: dict, key: str = 'ports') -> dict | None:
+    ports = body.get(key)
+    if not isinstance(ports, dict):
+        return None
+
+    try:
+        return {
+            'tcp_port': int(ports['tcp_port']),
+            'udp_port': int(ports['udp_port']),
+            'http_port': int(ports['http_port']),
+        }
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def register_instance_routes(app):
+    @app.route('/api/instances/<instance_id>/prepare', methods=['POST'])
+    def prepare_instance(instance_id):
         require_jwt()
         body = request.get_json(silent=True) or {}
+        ports = _ports_from_payload(body)
 
-        required = ['id', 'name', 'tcp_port', 'udp_port', 'http_port']
-        for field in required:
-            if not body.get(field):
-                return error(f"Champ '{field}' requis")
-
-        info = get_system_info()
-        if info['current_instances'] >= info['max_instances']:
-            return error(
-                f"Limite atteinte : {info['max_instances']} instance(s) max "
-                f"pour {info['cpu_cores']} cœurs physiques", 403
-            )
-
-        instance_id = str(body['id']).strip()
-        if config_store.has_instance(instance_id):
-            return error(f"Instance '{instance_id}' existe déjà")
-
-        new_ports = {int(body['tcp_port']), int(body['udp_port']), int(body['http_port'])}
-        for inst in config_store.get_instances():
-            existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
-            conflict = new_ports & existing_ports
-            if conflict:
-                return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
-
-        new_inst = {
-            'id': instance_id,
-            'name': str(body['name']).strip(),
-            'tcp_port': int(body['tcp_port']),
-            'udp_port': int(body['udp_port']),
-            'http_port': int(body['http_port']),
-        }
+        if not ports:
+            return error('ports requis')
 
         fw_errors = open_ports(
             instance_id,
-            int(body['tcp_port']),
-            int(body['udp_port']),
-            int(body['http_port']),
+            ports['tcp_port'],
+            ports['udp_port'],
+            ports['http_port'],
         )
 
-        cfg = config_store.load_config()
-        cfg['instances'].append(new_inst)
-        config_store.save_config(cfg)
-        config_store.set_instance(instance_id, new_inst)
-        config_store.mark_saved()
-
-        response = {**new_inst}
-        if fw_errors:
-            response['fw_warnings'] = fw_errors
-        return jsonify(response), 201
-
-    @app.route('/api/instances/<instance_id>', methods=['PUT'])
-    def update_instance(instance_id):
-        require_jwt()
-
-        if not config_store.has_instance(instance_id):
-            return error(f"Instance '{instance_id}' introuvable", 404)
-
-        if instance_id in _running and _running[instance_id]['process'].poll() is None:
-            return error("Arrêtez l'instance avant de la modifier", 409)
-
-        body = request.get_json(silent=True) or {}
-        old_inst = config_store.get_instance(instance_id).copy()
-
-        new_inst = {
-            'id': instance_id,
-            'name': str(body.get('name', old_inst['name'])).strip(),
-            'tcp_port': int(body.get('tcp_port', old_inst['tcp_port'])),
-            'udp_port': int(body.get('udp_port', old_inst['udp_port'])),
-            'http_port': int(body.get('http_port', old_inst['http_port'])),
-        }
-
-        new_ports = {new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port']}
-        old_ports = {old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port']}
-
-        if new_ports != old_ports:
-            for iid, inst in config_store.INSTANCES.items():
-                if iid == instance_id:
-                    continue
-
-                existing_ports = {inst.get('tcp_port'), inst.get('udp_port'), inst.get('http_port')}
-                conflict = new_ports & existing_ports
-
-                if conflict:
-                    return error(f"Port(s) déjà utilisé(s) : {', '.join(str(p) for p in conflict)}")
-
-            close_ports(instance_id, old_inst['tcp_port'], old_inst['udp_port'], old_inst['http_port'])
-            fw_errors = open_ports(instance_id, new_inst['tcp_port'], new_inst['udp_port'], new_inst['http_port'])
-        else:
-            fw_errors = []
-
-        cfg = config_store.load_config()
-        cfg['instances'] = [new_inst if i['id'] == instance_id else i for i in cfg['instances']]
-        config_store.save_config(cfg)
-        config_store.set_instance(instance_id, new_inst)
-        config_store.mark_saved()
-
-        response = {**new_inst}
+        response = {'status': 'prepared', 'instance_id': instance_id}
         if fw_errors:
             response['fw_warnings'] = fw_errors
 
         return jsonify(response)
 
-    @app.route('/api/instances/<instance_id>', methods=['DELETE'])
-    def delete_instance(instance_id):
+    @app.route('/api/instances/<instance_id>/network', methods=['PUT'])
+    def update_instance_network(instance_id):
         require_jwt()
 
-        if not config_store.has_instance(instance_id):
-            return error(f"Instance '{instance_id}' introuvable", 404)
+        if instance_id in _running and _running[instance_id]['process'].poll() is None:
+            return error("Arrêtez l'instance avant de modifier ses ports", 409)
+
+        body = request.get_json(silent=True) or {}
+        previous_ports = _ports_from_payload(body, 'previous_ports')
+        ports = _ports_from_payload(body)
+
+        if not previous_ports or not ports:
+            return error('previous_ports et ports requis')
+
+        fw_errors = []
+        if previous_ports != ports:
+            fw_errors.extend(close_ports(
+                instance_id,
+                previous_ports['tcp_port'],
+                previous_ports['udp_port'],
+                previous_ports['http_port'],
+            ))
+            fw_errors.extend(open_ports(
+                instance_id,
+                ports['tcp_port'],
+                ports['udp_port'],
+                ports['http_port'],
+            ))
+
+        response = {'status': 'network_updated', 'instance_id': instance_id}
+        if fw_errors:
+            response['fw_warnings'] = fw_errors
+
+        return jsonify(response)
+
+    @app.route('/api/instances/<instance_id>/cleanup', methods=['POST'])
+    def cleanup_instance(instance_id):
+        require_jwt()
 
         if instance_id in _running and _running[instance_id]['process'].poll() is None:
-            return error("Arrêtez l'instance avant de la supprimer", 409)
+            return error("Arrêtez l'instance avant de la nettoyer", 409)
 
-        inst_data = config_store.get_instance(instance_id) or {}
+        body = request.get_json(silent=True) or {}
+        ports = _ports_from_payload(body)
 
-        cfg = config_store.load_config()
-        cfg['instances'] = [i for i in cfg['instances'] if i['id'] != instance_id]
-        config_store.save_config(cfg)
-        config_store.remove_instance(instance_id)
-        config_store.mark_saved()
+        if not ports:
+            return error('ports requis')
 
         fw_errors = close_ports(
             instance_id,
-            inst_data.get('tcp_port', 0),
-            inst_data.get('udp_port', 0),
-            inst_data.get('http_port', 0),
+            ports['tcp_port'],
+            ports['udp_port'],
+            ports['http_port'],
         )
 
-        response = {'deleted': instance_id}
-
+        response = {'status': 'cleaned', 'instance_id': instance_id}
         if fw_errors:
             response['fw_warnings'] = fw_errors
 
         return jsonify(response)
-
-    @app.route('/api/instances/<instance_id>/status', methods=['GET'])
-    def instance_status(instance_id):
-        require_jwt()
-        inst = get_instance_or_404(instance_id)
-        return jsonify(get_instance_status(inst))
 
     @app.route('/api/instances/<instance_id>/launch', methods=['POST'])
     def instance_launch(instance_id):
         require_jwt()
 
-        inst = get_instance_or_404(instance_id)
-
         body = request.get_json(silent=True) or {}
+        inst = _instance_from_payload(body, instance_id)
+
+        if not inst:
+            return error('instance complète requise')
 
         runtime_config = body.get('runtime_config')
         launch_id = body.get('launch_id')
@@ -251,7 +220,11 @@ def register_instance_routes(app):
     def instance_start(instance_id):
         require_jwt()
 
-        inst = get_instance_or_404(instance_id)
+        body = request.get_json(silent=True) or {}
+        inst = _instance_from_payload(body, instance_id)
+
+        if not inst:
+            return error('instance complète requise')
 
         try:
             _, runtime_config = load_current_config(
@@ -292,7 +265,6 @@ def register_instance_routes(app):
     @app.route('/api/instances/<instance_id>/stop', methods=['POST'])
     def instance_stop(instance_id):
         require_jwt()
-        get_instance_or_404(instance_id)
 
         result = stop_instance(instance_id)
 
@@ -305,7 +277,15 @@ def register_instance_routes(app):
     def instance_restart(instance_id):
         require_jwt()
 
-        inst = get_instance_or_404(instance_id)
+        body = request.get_json(silent=True) or {}
+        inst = _instance_from_payload(body, instance_id)
+
+        if not inst:
+            info = _running.get(instance_id)
+            inst = info.get('instance') if info else None
+
+        if not inst:
+            return error('instance complète requise')
 
         try:
             _, runtime_config = load_current_config(

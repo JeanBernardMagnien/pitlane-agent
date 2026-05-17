@@ -12,7 +12,6 @@ GAME_CFG = {}
 AUTH_CFG = {}
 HTTP_CFG = {}
 LOGGING_CFG = {}
-INSTANCES = {}
 
 
 def load_config() -> dict:
@@ -26,13 +25,12 @@ def save_config(cfg: dict):
 
 
 def _apply_config(cfg: dict):
-    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG, INSTANCES
+    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG
     CFG = cfg
     GAME_CFG = cfg['game']
     AUTH_CFG = cfg['auth']
     HTTP_CFG = cfg['http']
     LOGGING_CFG = cfg['logging']
-    INSTANCES = {inst['id']: inst for inst in cfg['instances']}
 
 
 def reload_from_disk():
@@ -60,31 +58,6 @@ def mark_saved():
     global _config_mtime
     with _config_lock:
         _config_mtime = CONFIG_PATH.stat().st_mtime
-
-
-def get_instances() -> list[dict]:
-    with _config_lock:
-        return list(INSTANCES.values())
-
-
-def get_instance(instance_id: str) -> dict | None:
-    with _config_lock:
-        return INSTANCES.get(instance_id)
-
-
-def has_instance(instance_id: str) -> bool:
-    with _config_lock:
-        return instance_id in INSTANCES
-
-
-def set_instance(instance_id: str, instance: dict):
-    with _config_lock:
-        INSTANCES[instance_id] = instance
-
-
-def remove_instance(instance_id: str):
-    with _config_lock:
-        INSTANCES.pop(instance_id, None)
 
 
 reload_from_disk()
