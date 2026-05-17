@@ -10,11 +10,6 @@ from routes.configs import register_config_routes
 from routes.instances import register_instance_routes
 from routes.logs import register_log_routes
 from routes.steam import register_steam_routes
-from services.hub_client import post_json
-from services.monitor import SnapshotMonitor
-from services.snapshot_builder import build_instances_snapshot
-
-_monitor = None
 
 
 def _watch_config():
@@ -22,42 +17,9 @@ def _watch_config():
         threading.Event().wait(1)
         try:
             if config_store.reload_if_changed():
-                print(f"[config] Rechargé — {len(config_store.get_instances())} instance(s)")
+                print('[config] Rechargé')
         except Exception as e:
             print(f"[config] Erreur rechargement : {e}")
-
-
-def _start_monitor():
-    global _monitor
-
-    hub_cfg = config_store.CFG.get('hub', {})
-    base_url = str(hub_cfg.get('base_url', '')).rstrip('/')
-    endpoint = str(hub_cfg.get('state_endpoint', '/api/agent/instances/state'))
-    interval = int(hub_cfg.get('monitor_interval', 5))
-    token = config_store.AUTH_CFG['jwt_secret']
-
-    if not base_url:
-        print('[monitor] Hub push disabled: hub.base_url is empty')
-        return
-
-    target_url = f'{base_url}{endpoint}'
-
-    def push_state(snapshot):
-        payload = {
-            'instances': snapshot,
-            'system_info': get_system_info(),
-        }
-        result = post_json(target_url, payload, token=token)
-        if not result.get('ok'):
-            print(f"[monitor] Hub push failed: {result.get('status')} {result.get('body')}")
-
-    _monitor = SnapshotMonitor(interval=interval)
-    _monitor.start(on_change=push_state)
-
-    initial_snapshot = build_instances_snapshot(config_store.get_instances())
-    push_state(initial_snapshot)
-
-    print(f'[monitor] Hub push enabled every {interval}s -> {target_url}')
 
 
 def create_app():
@@ -79,7 +41,6 @@ def create_app():
 
 _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
-_start_monitor()
 
 app = create_app()
 
