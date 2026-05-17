@@ -258,7 +258,7 @@ def register_instance_routes(app):
     def instance_stop(instance_id):
         require_jwt()
 
-        result = stop_instance(instance_id)
+        result = stop_instance(instance_id, config_store.LOGGING_CFG)
 
         if 'error' in result:
             return jsonify(result), 409
