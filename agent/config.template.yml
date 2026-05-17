@@ -22,8 +22,6 @@ steam:
 
 hub:
   base_url: https://pitlane-evo.fr
-  server_id: __SERVER_ID__
-  agent_token: __AGENT_TOKEN__
   runtime_report_endpoint: /api/agent/runtime-report
   runtime_report_interval: 10
   instance_http_timeout: 0.5
