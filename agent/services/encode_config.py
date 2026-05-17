@@ -1,5 +1,12 @@
 import sys, json, zlib, base64
 
+SESSION_KEY_MAP = {
+    'PracticeSession': 'practice',
+    'QualifyingSession': 'qualify',
+    'WarmupSession': 'warmup',
+    'RaceSession': 'race',
+}
+
 
 def _encode(data):
     json_str = json.dumps(data, indent=2, ensure_ascii=False).replace('\n', '\r\n')
@@ -22,15 +29,18 @@ def _time_of_day(session: dict) -> dict:
     }
 
 
-def _apply_session(game_config: dict, sessions: dict, source_key: str, prefix: str) -> None:
-    session = sessions.get(source_key)
-    if not session:
+def _apply_session(game_config: dict, source_key: str, session: dict) -> None:
+    prefix = SESSION_KEY_MAP.get(source_key)
+    if not prefix:
         return
 
     game_config[f"{prefix}_duration"] = session['Length']
     game_config[f"{prefix}_time_of_day"] = _time_of_day(session)
     game_config[f"{prefix}_overtime_waiting_next_session"] = session['OvertimeWaitingNextSession']
     game_config[f"{prefix}_max_wait_to_box"] = session['MaxWaitToBox']
+
+    if source_key == 'RaceSession':
+        game_config["race_duration_type"] = "GameModeSelectionDuration_TIME"
 
 
 def encode_payload(cfg: dict) -> tuple[str, str]:
@@ -59,15 +69,18 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
     }
 
     game_config = {}
-    _apply_session(game_config, sessions, 'PracticeSession', 'practice')
-    _apply_session(game_config, sessions, 'QualifyingSession', 'qualify')
-    _apply_session(game_config, sessions, 'WarmupSession', 'warmup')
-    _apply_session(game_config, sessions, 'RaceSession', 'race')
+    waiting_session = None
 
-    if 'RaceSession' in sessions:
-        game_config["race_duration_type"] = "GameModeSelectionDuration_TIME"
+    ordered_sessions = sorted(
+        sessions.items(),
+        key=lambda item: item[1].get('Order', 999)
+    )
 
-    waiting_session = sessions.get('RaceSession') or sessions.get('PracticeSession')
+    for source_key, session in ordered_sessions:
+        _apply_session(game_config, source_key, session)
+        if source_key in ('RaceSession', 'PracticeSession'):
+            waiting_session = session
+
     if waiting_session:
         game_config["min_waiting_for_players"] = waiting_session['MinWaitingForPlayers']
         game_config["max_waiting_for_players"] = waiting_session['MaxWaitingForPlayers']
