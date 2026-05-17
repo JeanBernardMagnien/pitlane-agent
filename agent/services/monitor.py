@@ -3,7 +3,6 @@ import json
 import threading
 from typing import Callable
 
-from core import config_store
 from services.snapshot_builder import build_instances_snapshot
 
 
@@ -31,8 +30,7 @@ class SnapshotMonitor:
 
     def _run(self, on_change):
         while not self._stop_event.wait(self.interval):
-            instances = config_store.get_instances()
-            snapshot = build_instances_snapshot(instances)
+            snapshot = build_instances_snapshot()
             snapshot_hash = self._hash_snapshot(snapshot)
 
             if snapshot_hash == self._last_hash:
