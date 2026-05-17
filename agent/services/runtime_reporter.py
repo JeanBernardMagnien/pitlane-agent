@@ -73,14 +73,9 @@ def _runtime_report_url() -> str | None:
     return base_url + endpoint
 
 
-def _server_id() -> str | None:
-    value = _hub_config().get('server_id')
-    return str(value).strip() if value not in (None, '') else None
-
-
 def _agent_token() -> str | None:
     hub_cfg = _hub_config()
-    value = hub_cfg.get('agent_token', hub_cfg.get('token'))
+    value = hub_cfg.get('agent_token', hub_cfg.get('token')) or config_store.AUTH_CFG.get('jwt_secret')
     return str(value).strip() if value not in (None, '') else None
 
 
@@ -202,10 +197,9 @@ def build_runtime_report() -> dict:
 
 def send_runtime_report() -> bool:
     url = _runtime_report_url()
-    server_id = _server_id()
     token = _agent_token()
 
-    if not url or not server_id or not token:
+    if not url or not token:
         return False
 
     started = time.perf_counter()
@@ -218,7 +212,6 @@ def send_runtime_report() -> bool:
         data=body,
         headers={
             'Content-Type': 'application/json',
-            'X-Pitlane-Server-Id': server_id,
             'X-Pitlane-Agent-Token': token,
         },
         method='POST',
@@ -247,7 +240,7 @@ def start_runtime_reporter():
     if _reporter_thread and _reporter_thread.is_alive():
         return
 
-    if not (_runtime_report_url() and _server_id() and _agent_token()):
+    if not (_runtime_report_url() and _agent_token()):
         print('[runtime-report] Désactivé: configuration hub incomplète')
         return
 
