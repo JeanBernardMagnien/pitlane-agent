@@ -10,27 +10,6 @@ def _encode(data):
     return base64.b64encode(header + compressed).decode('ascii')
 
 
-def _empty_session(name: str) -> dict:
-    return {
-        "forceTimeDuration": name != "Race",
-        "TimeMultiplier": 1,
-        "IsVisible": False,
-        "Name": name,
-        "Duration": 0,
-        "Length": 0,
-        "Hour": 0,
-        "Minute": 0,
-        "MaxWaitToBox": 0,
-        "OvertimeWaitingNextSession": 0,
-        "MinWaitingForPlayers": 0,
-        "MaxWaitingForPlayers": 0,
-    }
-
-
-def _session(sessions: dict, key: str, name: str) -> dict:
-    return sessions.get(key) or _empty_session(name)
-
-
 def _time_of_day(session: dict) -> dict:
     return {
         "year": 2024,
@@ -43,16 +22,23 @@ def _time_of_day(session: dict) -> dict:
     }
 
 
+def _apply_session(game_config: dict, sessions: dict, source_key: str, prefix: str) -> None:
+    session = sessions.get(source_key)
+    if not session:
+        return
+
+    game_config[f"{prefix}_duration"] = session['Length']
+    game_config[f"{prefix}_time_of_day"] = _time_of_day(session)
+    game_config[f"{prefix}_overtime_waiting_next_session"] = session['OvertimeWaitingNextSession']
+    game_config[f"{prefix}_max_wait_to_box"] = session['MaxWaitToBox']
+
+
 def encode_payload(cfg: dict) -> tuple[str, str]:
     """Prend un payload JSON maître, retourne (serverconfig_b64, seasondefinition_b64)."""
     server = cfg['Server']
     cars = [{"car_name": c['name'], "ballast": 0, "restrictor": 0.0} for c in cfg['Event']['Cars'] if c['IsSelected']]
     track_parts = cfg['Event']['SelectedTrackValue'].split('|')
     sessions = cfg['Sessions']
-    practice = _session(sessions, 'PracticeSession', 'Practice')
-    qualifying = _session(sessions, 'QualifyingSession', 'Qualify')
-    warmup = _session(sessions, 'WarmupSession', 'Warmup')
-    race = _session(sessions, 'RaceSession', 'Race')
 
     server_config = {
         "server_tcp_listener_port": server['TcpPort'],
@@ -72,6 +58,20 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
         "results_path": server['ResultsPath']
     }
 
+    game_config = {}
+    _apply_session(game_config, sessions, 'PracticeSession', 'practice')
+    _apply_session(game_config, sessions, 'QualifyingSession', 'qualify')
+    _apply_session(game_config, sessions, 'WarmupSession', 'warmup')
+    _apply_session(game_config, sessions, 'RaceSession', 'race')
+
+    if 'RaceSession' in sessions:
+        game_config["race_duration_type"] = "GameModeSelectionDuration_TIME"
+
+    waiting_session = sessions.get('RaceSession') or sessions.get('PracticeSession')
+    if waiting_session:
+        game_config["min_waiting_for_players"] = waiting_session['MinWaitingForPlayers']
+        game_config["max_waiting_for_players"] = waiting_session['MaxWaitingForPlayers']
+
     season_def = {
         "game_type": cfg['Event']['SelectedSessionTypeValue'],
         "event": {
@@ -81,27 +81,7 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
             "track_length": track_parts[3]
         },
         "export_json": False,
-        "game_config": {
-            "practice_duration": practice['Length'],
-            "practice_time_of_day": _time_of_day(practice),
-            "practice_overtime_waiting_next_session": practice['OvertimeWaitingNextSession'],
-            "practice_max_wait_to_box": practice['MaxWaitToBox'],
-            "qualify_duration": qualifying['Length'],
-            "qualify_time_of_day": _time_of_day(qualifying),
-            "qualify_overtime_waiting_next_session": qualifying['OvertimeWaitingNextSession'],
-            "qualify_max_wait_to_box": qualifying['MaxWaitToBox'],
-            "warmup_duration": warmup['Length'],
-            "warmup_time_of_day": _time_of_day(warmup),
-            "warmup_overtime_waiting_next_session": warmup['OvertimeWaitingNextSession'],
-            "warmup_max_wait_to_box": warmup['MaxWaitToBox'],
-            "race_duration": race['Length'],
-            "race_duration_type": "GameModeSelectionDuration_TIME",
-            "race_time_of_day": _time_of_day(race),
-            "race_overtime_waiting_next_session": race['OvertimeWaitingNextSession'],
-            "race_max_wait_to_box": race['MaxWaitToBox'],
-            "min_waiting_for_players": practice['MinWaitingForPlayers'],
-            "max_waiting_for_players": practice['MaxWaitingForPlayers']
-        },
+        "game_config": game_config,
         "weather_type": cfg['Event']['SelectedWeatherTypeValue'],
         "weather_behaviour": cfg['Event']['SelectedWeatherBehaviorValue'],
         "initial_grip": cfg['Event']['SelectedInitialGripValue']
