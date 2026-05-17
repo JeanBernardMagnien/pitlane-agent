@@ -9,6 +9,7 @@ from core.system_info import get_system_info
 from routes.instances import register_instance_routes
 from routes.logs import register_log_routes
 from routes.steam import register_steam_routes
+from services.runtime_reporter import start_runtime_reporter
 
 
 def _watch_config():
@@ -41,6 +42,7 @@ _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
 
 app = create_app()
+start_runtime_reporter()
 
 
 if __name__ == '__main__':
