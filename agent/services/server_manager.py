@@ -6,7 +6,7 @@ import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
 
-# { instance_id → { process, started_at, config, config_loaded_at, log_file } }
+# { instance_id → { process, instance, started_at, config, config_loaded_at, log_file } }
 _running = {}
 
 # Survit au stop/crash — garde la dernière config connue par instance
@@ -66,6 +66,7 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
     now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
     _running[instance_id] = {
         'process': process,
+        'instance': instance_cfg,
         'started_at': time.time(),
         'config': filename,
         'config_loaded_at': now,
