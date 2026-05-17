@@ -178,7 +178,7 @@ $steps = @(
     "[8] Installation dependances",
     "[9] Generation config.yml",
     "[10] Tache planifiee Windows",
-    "[11] Regles firewall",
+    "[11] Regle firewall API agent",
     "[12] Termine"
 )
 
@@ -514,23 +514,17 @@ $form.Add_Shown({
     Add-Log "Agent PitLane demarre"
     Set-StepStatus 9 "ok"
 
-    # [11] Regles firewall
+    # [11] Regle firewall API agent
     Set-StepStatus 10 "running"
 
-    Get-NetFirewallRule -DisplayName "PitLane -*" -ErrorAction SilentlyContinue |
+    Get-NetFirewallRule -DisplayName "PitLane - Agent API 8181" -ErrorAction SilentlyContinue |
         Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
-    @(
-        @{ Name = "PitLane - Agent API 8181";          Port = 8181; Proto = "TCP" },
-        @{ Name = "PitLane - AC EVO server1 TCP 9700"; Port = 9700; Proto = "TCP" },
-        @{ Name = "PitLane - AC EVO server1 UDP 9700"; Port = 9700; Proto = "UDP" },
-        @{ Name = "PitLane - AC EVO server1 HTTP 8081";Port = 8081; Proto = "TCP" }
-    ) | ForEach-Object {
-        New-NetFirewallRule -DisplayName $_.Name -Direction Inbound `
-            -Protocol $_.Proto -LocalPort $_.Port -Action Allow `
-            -ErrorAction SilentlyContinue | Out-Null
-        Add-Log "Firewall : $($_.Proto)/$($_.Port) ouvert ($($_.Name))"
-    }
+    New-NetFirewallRule -DisplayName "PitLane - Agent API 8181" -Direction Inbound `
+        -Protocol TCP -LocalPort 8181 -Action Allow `
+        -ErrorAction SilentlyContinue | Out-Null
+    Add-Log "Firewall : TCP/8181 ouvert (PitLane - Agent API 8181)"
+    Add-Log "Les ports d'instances seront geres par le hub lors de la creation/modification/suppression."
 
     Set-StepStatus 10 "ok"
 
