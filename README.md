@@ -109,9 +109,9 @@ Ces routes ne créent pas d'instance métier dans l'agent. Elles appliquent uniq
 
 | Méthode | Route | Description |
 |---|---|---|
-| POST | `/api/instances/{id}/prepare` | Prépare les dossiers et ports firewall |
+| POST | `/api/instances/{id}/prepare` | Prépare les ports firewall |
 | PUT | `/api/instances/{id}/network` | Remplace les anciennes règles firewall par les nouvelles |
-| POST | `/api/instances/{id}/cleanup` | Nettoie les règles firewall et arrête l'instance si elle tourne |
+| POST | `/api/instances/{id}/cleanup` | Nettoie les règles firewall et refuse si l'instance tourne |
 
 ### Commandes runtime instance
 
@@ -123,11 +123,10 @@ Le hub fournit l'instance complète dans le payload quand l'agent doit agir.
 | POST | `/api/instances/{id}/start` | Démarre une instance avec la dernière config runtime courante |
 | POST | `/api/instances/{id}/stop` | Arrête une instance |
 | POST | `/api/instances/{id}/restart` | Redémarre une instance avec une config runtime fournie |
-| POST | `/api/instances/{id}/switch` | Charge une config et redémarre |
 | GET | `/api/instances/{id}/logs` | Dernières lignes de log |
 | WS | `/api/instances/{id}/logs/stream` | Logs en temps réel |
 
-Les anciennes routes de lecture/synchro/CRUD instance retournent `410 Gone` :
+Les anciennes routes de lecture/synchro/CRUD instance ne sont plus exposées :
 
 | Méthode | Route |
 |---|---|
@@ -137,6 +136,7 @@ Les anciennes routes de lecture/synchro/CRUD instance retournent `410 Gone` :
 | PUT | `/api/instances/{id}` |
 | DELETE | `/api/instances/{id}` |
 | GET | `/api/instances/{id}/status` |
+| POST | `/api/instances/{id}/switch` |
 
 ### Configs
 
