@@ -2,7 +2,7 @@
 
 Agent léger installé sur chaque serveur Windows de jeu Assetto Corsa EVO.
 
-L'agent n'est plus propriétaire des instances métier. Le hub PitLane possède les serveurs, les instances, les ports et les presets. L'agent exécute les commandes reçues, prépare le réseau local, lance les processus AC EVO et expose les logs/runtime.
+L'agent n'est plus propriétaire des instances métier. Le hub PitLane possède les serveurs, les instances, les ports et les presets. L'agent exécute les commandes reçues, prépare le réseau local, lance les processus AC EVO et expose les logs.
 
 ## Installation
 
@@ -62,6 +62,7 @@ Le hub est propriétaire de :
 - les ports TCP/UDP/HTTP
 - les presets/sessions
 - les décisions de création/modification/suppression
+- l'état serveur/instance affiché dans l'interface
 
 ### Agent
 
@@ -71,7 +72,7 @@ L'agent est responsable de :
 - ouvrir/fermer les ports demandés par le hub
 - lancer/arrêter/redémarrer un processus AC EVO
 - appliquer les chemins runtime nécessaires
-- exposer les logs et l'état runtime observable
+- exposer les logs
 - exécuter SteamCMD pour les mises à jour/vérifications
 
 ## Push agent vers hub
@@ -86,7 +87,7 @@ Objectif futur :
 - persistance côté hub
 - diffusion Mercure vers l'interface
 
-Dans cette branche, l'ancien push basé sur `config.yml.instances` est désactivé.
+Dans cette branche, l'ancien push basé sur `config.yml.instances` est désactivé. Le hub ne doit plus interroger l'agent pour récupérer l'état serveur ou instance.
 
 ## API REST
 
@@ -100,7 +101,7 @@ Authorization: Bearer <token>
 
 | Méthode | Route | Description |
 |---|---|---|
-| GET | `/api/system` | Infos système |
+| GET | `/api/system` | Infos système ponctuelles |
 
 ### Provisioning technique instance
 
@@ -112,28 +113,30 @@ Ces routes ne créent pas d'instance métier dans l'agent. Elles appliquent uniq
 | PUT | `/api/instances/{id}/network` | Remplace les anciennes règles firewall par les nouvelles |
 | POST | `/api/instances/{id}/cleanup` | Nettoie les règles firewall et arrête l'instance si elle tourne |
 
-### Runtime instance
+### Commandes runtime instance
 
 Le hub fournit l'instance complète dans le payload quand l'agent doit agir.
 
 | Méthode | Route | Description |
 |---|---|---|
-| GET | `/api/instances` | Liste les instances runtime connues par l'agent |
-| GET | `/api/instances/{id}/status` | Statut runtime détaillé |
-| POST | `/api/instances/{id}/start` | Démarre une instance avec une config runtime fournie |
+| POST | `/api/instances/{id}/launch` | Lance une instance avec une config runtime fournie |
+| POST | `/api/instances/{id}/start` | Démarre une instance avec la dernière config runtime courante |
 | POST | `/api/instances/{id}/stop` | Arrête une instance |
 | POST | `/api/instances/{id}/restart` | Redémarre une instance avec une config runtime fournie |
 | POST | `/api/instances/{id}/switch` | Charge une config et redémarre |
 | GET | `/api/instances/{id}/logs` | Dernières lignes de log |
 | WS | `/api/instances/{id}/logs/stream` | Logs en temps réel |
 
-Les anciennes routes CRUD suivantes sont dépréciées et retournent `410 Gone` :
+Les anciennes routes de lecture/synchro/CRUD instance retournent `410 Gone` :
 
 | Méthode | Route |
 |---|---|
+| GET | `/api/instances` |
 | POST | `/api/instances` |
+| GET | `/api/instances/{id}` |
 | PUT | `/api/instances/{id}` |
 | DELETE | `/api/instances/{id}` |
+| GET | `/api/instances/{id}/status` |
 
 ### Configs
 
