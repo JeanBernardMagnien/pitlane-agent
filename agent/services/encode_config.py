@@ -10,6 +10,29 @@ def _encode(data):
     return base64.b64encode(header + compressed).decode('ascii')
 
 
+def _time_of_day(session: dict) -> dict:
+    return {
+        "year": 2024,
+        "month": 8,
+        "day": 15,
+        "hour": session['Hour'],
+        "minute": session['Minute'],
+        "second": 0,
+        "time_multiplier": 1,
+    }
+
+
+def _apply_session(game_config: dict, sessions: dict, source_key: str, prefix: str) -> None:
+    session = sessions.get(source_key)
+    if not session:
+        return
+
+    game_config[f"{prefix}_duration"] = session['Length']
+    game_config[f"{prefix}_time_of_day"] = _time_of_day(session)
+    game_config[f"{prefix}_overtime_waiting_next_session"] = session['OvertimeWaitingNextSession']
+    game_config[f"{prefix}_max_wait_to_box"] = session['MaxWaitToBox']
+
+
 def encode_payload(cfg: dict) -> tuple[str, str]:
     """Prend un payload JSON maître, retourne (serverconfig_b64, seasondefinition_b64)."""
     server = cfg['Server']
@@ -28,12 +51,26 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
         "cycle": server['IsCycleEnabled'],
         "allowed_cars_list_full": cars,
         "driver_password": server['DriverPassword'],
-        "spectator_password": "",
+        "spectator_password": server['SpectatorPassword'],
         "admin_password": server['AdminPassword'],
         "type": server['SelectedServerTypeValue'],
         "entry_list_path": server['EntryListPath'],
         "results_path": server['ResultsPath']
     }
+
+    game_config = {}
+    _apply_session(game_config, sessions, 'PracticeSession', 'practice')
+    _apply_session(game_config, sessions, 'QualifyingSession', 'qualify')
+    _apply_session(game_config, sessions, 'WarmupSession', 'warmup')
+    _apply_session(game_config, sessions, 'RaceSession', 'race')
+
+    if 'RaceSession' in sessions:
+        game_config["race_duration_type"] = "GameModeSelectionDuration_TIME"
+
+    waiting_session = sessions.get('RaceSession') or sessions.get('PracticeSession')
+    if waiting_session:
+        game_config["min_waiting_for_players"] = waiting_session['MinWaitingForPlayers']
+        game_config["max_waiting_for_players"] = waiting_session['MaxWaitingForPlayers']
 
     season_def = {
         "game_type": cfg['Event']['SelectedSessionTypeValue'],
@@ -44,27 +81,7 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
             "track_length": track_parts[3]
         },
         "export_json": False,
-        "game_config": {
-            "practice_duration": sessions['PracticeSession']['Length'],
-            "practice_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['PracticeSession']['Hour'], "minute": sessions['PracticeSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "practice_overtime_waiting_next_session": sessions['PracticeSession']['OvertimeWaitingNextSession'],
-            "practice_max_wait_to_box": sessions['PracticeSession']['MaxWaitToBox'],
-            "qualify_duration": sessions['QualifyingSession']['Length'],
-            "qualify_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['QualifyingSession']['Hour'], "minute": sessions['QualifyingSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "qualify_overtime_waiting_next_session": sessions['QualifyingSession']['OvertimeWaitingNextSession'],
-            "qualify_max_wait_to_box": sessions['QualifyingSession']['MaxWaitToBox'],
-            "warmup_duration": sessions['WarmupSession']['Length'],
-            "warmup_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['WarmupSession']['Hour'], "minute": sessions['WarmupSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "warmup_overtime_waiting_next_session": sessions['WarmupSession']['OvertimeWaitingNextSession'],
-            "warmup_max_wait_to_box": sessions['WarmupSession']['MaxWaitToBox'],
-            "race_duration": sessions['RaceSession']['Length'],
-            "race_duration_type": "GameModeSelectionDuration_TIME",
-            "race_time_of_day": {"year": 2024, "month": 8, "day": 15, "hour": sessions['RaceSession']['Hour'], "minute": sessions['RaceSession']['Minute'], "second": 0, "time_multiplier": 1},
-            "race_overtime_waiting_next_session": sessions['RaceSession']['OvertimeWaitingNextSession'],
-            "race_max_wait_to_box": sessions['RaceSession']['MaxWaitToBox'],
-            "min_waiting_for_players": sessions['PracticeSession']['MinWaitingForPlayers'],
-            "max_waiting_for_players": sessions['PracticeSession']['MaxWaitingForPlayers']
-        },
+        "game_config": game_config,
         "weather_type": cfg['Event']['SelectedWeatherTypeValue'],
         "weather_behaviour": cfg['Event']['SelectedWeatherBehaviorValue'],
         "initial_grip": cfg['Event']['SelectedInitialGripValue']
