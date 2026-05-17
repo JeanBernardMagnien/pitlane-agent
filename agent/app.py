@@ -6,7 +6,6 @@ from flask_sock import Sock
 from core import config_store
 from core.auth import require_jwt
 from core.system_info import get_system_info
-from routes.configs import register_config_routes
 from routes.instances import register_instance_routes
 from routes.logs import register_log_routes
 from routes.steam import register_steam_routes
@@ -32,7 +31,6 @@ def create_app():
         return jsonify(get_system_info())
 
     register_instance_routes(app)
-    register_config_routes(app)
     register_log_routes(app, sock)
     register_steam_routes(app)
 
