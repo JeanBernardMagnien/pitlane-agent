@@ -16,7 +16,6 @@ from services.runtime_config_compiler import (
 )
 from services.server_manager import (
     _running,
-    get_instance_status,
     restart_instance,
     start_instance,
     stop_instance,
@@ -60,19 +59,6 @@ def _ports_from_payload(body: dict, key: str = 'ports') -> dict | None:
 
 
 def register_instance_routes(app):
-    @app.route('/api/instances', methods=['GET'])
-    def list_instances():
-        require_jwt()
-        statuses = []
-
-        for instance_id, info in list(_running.items()):
-            instance_cfg = info.get('instance')
-            if not instance_cfg:
-                continue
-            statuses.append(get_instance_status(instance_cfg))
-
-        return jsonify(statuses)
-
     @app.route('/api/instances/<instance_id>/prepare', methods=['POST'])
     def prepare_instance(instance_id):
         require_jwt()
@@ -156,32 +142,14 @@ def register_instance_routes(app):
 
         return jsonify(response)
 
-    @app.route('/api/instances', methods=['POST'])
-    @app.route('/api/instances/<instance_id>', methods=['PUT', 'DELETE'])
-    def deprecated_instance_crud(instance_id=None):
+    @app.route('/api/instances', methods=['GET', 'POST'])
+    @app.route('/api/instances/<instance_id>', methods=['GET', 'PUT', 'DELETE'])
+    @app.route('/api/instances/<instance_id>/status', methods=['GET'])
+    def deprecated_instance_state_or_crud(instance_id=None):
         require_jwt()
         return jsonify({
-            'error': 'Deprecated route. Instances are owned by the hub. Use prepare/network/cleanup for technical provisioning.',
+            'error': 'Deprecated route. Instances and runtime state are owned by the hub. Use command/provisioning routes only.',
         }), 410
-
-    @app.route('/api/instances/<instance_id>/status', methods=['GET'])
-    def instance_status(instance_id):
-        require_jwt()
-        info = _running.get(instance_id)
-        if not info or not info.get('instance'):
-            return jsonify({
-                'id': instance_id,
-                'status': 'offline',
-                'pid': None,
-                'uptime_seconds': None,
-                'started_at': None,
-                'ram_mb': None,
-                'connected_drivers': None,
-                'active_config': None,
-                'active_config_loaded_at': None,
-            })
-
-        return jsonify(get_instance_status(info['instance']))
 
     @app.route('/api/instances/<instance_id>/launch', methods=['POST'])
     def instance_launch(instance_id):
