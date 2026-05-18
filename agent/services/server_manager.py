@@ -40,6 +40,14 @@ def _open_log_file(instance_id: str, logs_path: str):
     return open(log_path, 'a', encoding='utf-8')
 
 
+def _save_runtime_state_safe(logging_cfg: dict):
+    try:
+        from services.runtime_state import save_runtime_state
+        save_runtime_state(logging_cfg)
+    except Exception as exc:
+        print(f"[runtime-state] Erreur sauvegarde : {exc}")
+
+
 def get_runtime_instances() -> list[dict]:
     """Retourne les instances connues en mémoire par l'agent runtime."""
     return [info['instance'] for info in _running.values() if info.get('instance')]
@@ -83,10 +91,12 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
             'config_loaded_at': now,
         }
 
+    _save_runtime_state_safe(logging_cfg)
+
     return {'status': 'started', 'pid': process.pid}
 
 
-def stop_instance(instance_id: str) -> dict:
+def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
     """Arrête proprement une instance. La dernière config reste dans _last_config."""
     if instance_id not in _running:
         return {'error': f"Instance {instance_id} non trouvée"}
@@ -109,6 +119,10 @@ def stop_instance(instance_id: str) -> dict:
         info['log_file'].close()
 
     del _running[instance_id]
+
+    if logging_cfg:
+        _save_runtime_state_safe(logging_cfg)
+
     return {'status': 'stopped'}
 
 
@@ -116,7 +130,7 @@ def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
                      logging_cfg: dict, serverconfig_b64: str,
                      seasondefinition_b64: str, filename: str | None = None) -> dict:
     """Stop + Start en conservant le filename."""
-    stop_instance(instance_id)
+    stop_instance(instance_id, logging_cfg)
     time.sleep(2)
     return start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=filename)
 

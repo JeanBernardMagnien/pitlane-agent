@@ -22,8 +22,9 @@ steam:
 
 hub:
   base_url: https://pitlane-evo.fr
-  state_endpoint: /api/agent/instances/state
-  monitor_interval: 5
+  runtime_report_endpoint: /api/agent/runtime-report
+  runtime_report_interval: 10
+  instance_http_timeout: 0.5
 
 auth:
   jwt_secret: __JWT_SECRET__
