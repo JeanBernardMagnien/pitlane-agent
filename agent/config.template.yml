@@ -1,7 +1,5 @@
 ####################################################################
 # PitLane Agent - Configuration template
-# This file is used by the installers to generate config.yml
-# It is removed after installation.
 ####################################################################
 
 http:
@@ -20,30 +18,27 @@ steam:
   app_id: 4564210
   appmanifest_path: __APPMANIFEST_PATH__
 
-# Backward compatible single hub config.
-# Existing installations continue to work with this section.
-hub:
-  base_url: https://pitlane-evo.fr
-  runtime_report_endpoint: /api/agent/runtime-report
-  runtime_report_interval: 10
-  instance_http_timeout: 0.5
+hubs:
+  - name: production
+    enabled: true
+    required: true
+    base_url: https://pitlane-evo.fr
+    runtime_report_endpoint: /api/agent/runtime-report
+    runtime_report_interval: 10
+    instance_http_timeout: 0.5
 
-# Optional multi-hub runtime mirroring.
-# Useful to push runtime reports to production + local development hub.
-#
-# hubs:
-#   - name: production
-#     enabled: true
-#     required: true
-#     base_url: https://pitlane-evo.fr
-#
-#   - name: local-dev
-#     enabled: true
-#     required: false
-#     base_url: https://your-dev-tunnel.trycloudflare.com
-#
-# A global token from `hub.agent_token` / `hub.token`
-# is automatically reused when a hub has no dedicated token.
+    # Optional dedicated token.
+    # Falls back to auth.jwt_secret when omitted.
+    # agent_token: your-token
+
+  # Example local development mirror.
+  # - name: local-dev
+  #   enabled: true
+  #   required: false
+  #   base_url: https://your-dev-tunnel.trycloudflare.com
+  #   runtime_report_endpoint: /api/agent/runtime-report
+  #   runtime_report_interval: 10
+  #   instance_http_timeout: 0.5
 
 auth:
   jwt_secret: __JWT_SECRET__
