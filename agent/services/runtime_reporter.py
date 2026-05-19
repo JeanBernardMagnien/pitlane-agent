@@ -3,6 +3,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 import psutil
@@ -13,6 +14,7 @@ from services.server_manager import _running
 
 DEFAULT_REPORT_INTERVAL_SECONDS = 10
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
+DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
 
 
 _reporter_thread = None
@@ -31,14 +33,7 @@ def _safe_float(value):
         return None
 
 
-def _hub_config() -> dict:
-    return config_store.CFG.get('hub', {}) or {}
-
-
-def _report_interval() -> int:
-    hub_cfg = _hub_config()
-    value = hub_cfg.get('runtime_report_interval', hub_cfg.get('monitor_interval', DEFAULT_REPORT_INTERVAL_SECONDS))
-
+def _coerce_report_interval(value) -> int:
     try:
         interval = int(value)
     except (TypeError, ValueError):
@@ -47,10 +42,7 @@ def _report_interval() -> int:
     return max(1, interval)
 
 
-def _http_timeout() -> float:
-    hub_cfg = _hub_config()
-    value = hub_cfg.get('instance_http_timeout', DEFAULT_HTTP_TIMEOUT_SECONDS)
-
+def _coerce_http_timeout(value) -> float:
     try:
         timeout = float(value)
     except (TypeError, ValueError):
@@ -59,10 +51,44 @@ def _http_timeout() -> float:
     return max(0.1, min(timeout, 5.0))
 
 
-def _runtime_report_url() -> str | None:
-    hub_cfg = _hub_config()
+def _enabled_hub_configs() -> list[dict]:
+    hubs_cfg = config_store.CFG.get('hubs') or []
+    enabled_hubs = []
+
+    for index, hub_cfg in enumerate(hubs_cfg):
+        if not isinstance(hub_cfg, dict):
+            continue
+
+        if hub_cfg.get('enabled', True) is False:
+            continue
+
+        enabled_hubs.append({
+            'name': hub_cfg.get('name') or f'hub-{index + 1}',
+            'enabled': True,
+            'required': bool(hub_cfg.get('required', False)),
+            'base_url': hub_cfg.get('base_url'),
+            'runtime_report_endpoint': hub_cfg.get('runtime_report_endpoint', DEFAULT_RUNTIME_REPORT_ENDPOINT),
+            'runtime_report_interval': _coerce_report_interval(hub_cfg.get('runtime_report_interval')),
+            'instance_http_timeout': _coerce_http_timeout(hub_cfg.get('instance_http_timeout')),
+            'agent_token': hub_cfg.get('agent_token', hub_cfg.get('token')),
+        })
+
+    return enabled_hubs
+
+
+def _report_interval() -> int:
+    intervals = [hub_cfg['runtime_report_interval'] for hub_cfg in _enabled_hub_configs()]
+    return min(intervals) if intervals else DEFAULT_REPORT_INTERVAL_SECONDS
+
+
+def _http_timeout() -> float:
+    timeouts = [hub_cfg['instance_http_timeout'] for hub_cfg in _enabled_hub_configs()]
+    return min(timeouts) if timeouts else DEFAULT_HTTP_TIMEOUT_SECONDS
+
+
+def _runtime_report_url(hub_cfg: dict) -> str | None:
     base_url = str(hub_cfg.get('base_url') or '').rstrip('/')
-    endpoint = str(hub_cfg.get('runtime_report_endpoint') or '/api/agent/runtime-report')
+    endpoint = str(hub_cfg.get('runtime_report_endpoint') or DEFAULT_RUNTIME_REPORT_ENDPOINT)
 
     if not base_url:
         return None
@@ -73,8 +99,7 @@ def _runtime_report_url() -> str | None:
     return base_url + endpoint
 
 
-def _agent_token() -> str | None:
-    hub_cfg = _hub_config()
+def _agent_token(hub_cfg: dict) -> str | None:
     value = hub_cfg.get('agent_token', hub_cfg.get('token')) or config_store.AUTH_CFG.get('jwt_secret')
     return str(value).strip() if value not in (None, '') else None
 
@@ -195,16 +220,17 @@ def build_runtime_report() -> dict:
     }
 
 
-def send_runtime_report() -> bool:
-    url = _runtime_report_url()
-    token = _agent_token()
+def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
+    url = _runtime_report_url(hub_cfg)
+    token = _agent_token(hub_cfg)
+    hub_name = hub_cfg.get('name') or 'hub'
+    required = bool(hub_cfg.get('required', False))
+    timeout = _coerce_http_timeout(hub_cfg.get('instance_http_timeout'))
 
     if not url or not token:
+        if required:
+            print(f'[runtime-report] Hub requis "{hub_name}" ignoré: configuration incomplète')
         return False
-
-    started = time.perf_counter()
-    payload = build_runtime_report()
-    payload['agent']['report_duration_ms'] = int((time.perf_counter() - started) * 1000)
 
     body = json.dumps(payload).encode('utf-8')
     req = urllib.request.Request(
@@ -218,10 +244,41 @@ def send_runtime_report() -> bool:
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            return 200 <= resp.status < 300
-    except (urllib.error.URLError, TimeoutError, OSError):
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            ok = 200 <= resp.status < 300
+            if not ok:
+                print(f'[runtime-report] Hub "{hub_name}" a répondu HTTP {resp.status}')
+            return ok
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        level = 'ERROR' if required else 'WARN'
+        print(f'[runtime-report] {level} hub "{hub_name}": {exc.__class__.__name__}')
         return False
+
+
+def send_runtime_report() -> bool:
+    hub_configs = _enabled_hub_configs()
+
+    if not hub_configs:
+        return False
+
+    started = time.perf_counter()
+    payload = build_runtime_report()
+    payload['agent']['report_duration_ms'] = int((time.perf_counter() - started) * 1000)
+
+    max_workers = min(len(hub_configs), 8)
+    results = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(_send_runtime_report_to_hub, hub_cfg, payload) for hub_cfg in hub_configs]
+
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                print(f'[runtime-report] Erreur push parallèle: {exc}')
+                results.append(False)
+
+    return any(results)
 
 
 def _report_loop():
@@ -240,11 +297,12 @@ def start_runtime_reporter():
     if _reporter_thread and _reporter_thread.is_alive():
         return
 
-    if not (_runtime_report_url() and _agent_token()):
-        print('[runtime-report] Désactivé: configuration hub incomplète')
+    hub_configs = _enabled_hub_configs()
+    if not any(_runtime_report_url(hub_cfg) and _agent_token(hub_cfg) for hub_cfg in hub_configs):
+        print('[runtime-report] Désactivé: configuration hubs incomplète')
         return
 
     _reporter_stop_event.clear()
     _reporter_thread = threading.Thread(target=_report_loop, daemon=True)
     _reporter_thread.start()
-    print(f'[runtime-report] Activé toutes les {_report_interval()}s')
+    print(f'[runtime-report] Activé toutes les {_report_interval()}s vers {len(hub_configs)} hub(s)')
