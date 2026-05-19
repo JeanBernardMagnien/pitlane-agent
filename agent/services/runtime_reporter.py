@@ -36,13 +36,29 @@ def _hub_config() -> dict:
     return config_store.CFG.get('hub', {}) or {}
 
 
+def _coerce_report_interval(value) -> int:
+    try:
+        interval = int(value)
+    except (TypeError, ValueError):
+        interval = DEFAULT_REPORT_INTERVAL_SECONDS
+
+    return max(1, interval)
+
+
+def _coerce_http_timeout(value) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError):
+        timeout = DEFAULT_HTTP_TIMEOUT_SECONDS
+
+    return max(0.1, min(timeout, 5.0))
+
+
 def _enabled_hub_configs() -> list[dict]:
     """Return enabled runtime report targets.
 
-    Backward compatible behavior:
-    - existing config.yml using `hub:` still works
-    - new config.yml can use `hubs:` to mirror reports to several hubs
-    - a global token in `hub.agent_token` / `hub.token` is reused when a target has no token
+    Preferred config uses `hubs:`.
+    Legacy `hub:` is still supported as a fallback for existing installs.
     """
     legacy_hub_cfg = _hub_config()
     hubs_cfg = config_store.CFG.get('hubs')
@@ -54,11 +70,18 @@ def _enabled_hub_configs() -> list[dict]:
                 'name': legacy_hub_cfg.get('name') or 'hub',
                 'enabled': True,
                 'required': True,
+                'runtime_report_endpoint': legacy_hub_cfg.get('runtime_report_endpoint', DEFAULT_RUNTIME_REPORT_ENDPOINT),
+                'runtime_report_interval': _coerce_report_interval(
+                    legacy_hub_cfg.get('runtime_report_interval', legacy_hub_cfg.get('monitor_interval'))
+                ),
+                'instance_http_timeout': _coerce_http_timeout(legacy_hub_cfg.get('instance_http_timeout')),
             }
         ] if legacy_hub_cfg else []
 
     global_token = legacy_hub_cfg.get('agent_token', legacy_hub_cfg.get('token'))
-    global_endpoint = legacy_hub_cfg.get('runtime_report_endpoint')
+    global_endpoint = legacy_hub_cfg.get('runtime_report_endpoint', DEFAULT_RUNTIME_REPORT_ENDPOINT)
+    global_interval = legacy_hub_cfg.get('runtime_report_interval', legacy_hub_cfg.get('monitor_interval'))
+    global_timeout = legacy_hub_cfg.get('instance_http_timeout')
     enabled_hubs = []
 
     for index, hub_cfg in enumerate(hubs_cfg):
@@ -74,6 +97,12 @@ def _enabled_hub_configs() -> list[dict]:
             'required': bool(hub_cfg.get('required', False)),
             'base_url': hub_cfg.get('base_url'),
             'runtime_report_endpoint': hub_cfg.get('runtime_report_endpoint', global_endpoint),
+            'runtime_report_interval': _coerce_report_interval(
+                hub_cfg.get('runtime_report_interval', global_interval)
+            ),
+            'instance_http_timeout': _coerce_http_timeout(
+                hub_cfg.get('instance_http_timeout', global_timeout)
+            ),
             'agent_token': hub_cfg.get('agent_token', hub_cfg.get('token', global_token)),
         }
         enabled_hubs.append(merged_cfg)
@@ -82,27 +111,13 @@ def _enabled_hub_configs() -> list[dict]:
 
 
 def _report_interval() -> int:
-    hub_cfg = _hub_config()
-    value = hub_cfg.get('runtime_report_interval', hub_cfg.get('monitor_interval', DEFAULT_REPORT_INTERVAL_SECONDS))
-
-    try:
-        interval = int(value)
-    except (TypeError, ValueError):
-        interval = DEFAULT_REPORT_INTERVAL_SECONDS
-
-    return max(1, interval)
+    intervals = [hub_cfg['runtime_report_interval'] for hub_cfg in _enabled_hub_configs()]
+    return min(intervals) if intervals else DEFAULT_REPORT_INTERVAL_SECONDS
 
 
 def _http_timeout() -> float:
-    hub_cfg = _hub_config()
-    value = hub_cfg.get('instance_http_timeout', DEFAULT_HTTP_TIMEOUT_SECONDS)
-
-    try:
-        timeout = float(value)
-    except (TypeError, ValueError):
-        timeout = DEFAULT_HTTP_TIMEOUT_SECONDS
-
-    return max(0.1, min(timeout, 5.0))
+    timeouts = [hub_cfg['instance_http_timeout'] for hub_cfg in _enabled_hub_configs()]
+    return min(timeouts) if timeouts else DEFAULT_HTTP_TIMEOUT_SECONDS
 
 
 def _runtime_report_url(hub_cfg: dict) -> str | None:
