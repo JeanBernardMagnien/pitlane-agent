@@ -113,19 +113,21 @@ L'agent est responsable de :
 
 ## Push agent vers hub
 
-L'agent pousse automatiquement son état runtime vers un ou plusieurs hubs.
+L'agent garde une connexion WebSocket persistante vers un ou plusieurs hubs. Ce canal est le chemin live par defaut pour les commandes et les métriques runtime.
 
 Chaque hub configuré reçoit :
 
 - heartbeat agent
 - état runtime des instances lancées
 - infos techniques serveur : CPU, RAM, processus, build local, erreurs
-- persistance côté hub
-- diffusion Mercure vers l'interface
+- diffusion live vers l'interface via le hub
+- stockage live cote hub attendu dans Redis, pas en ecriture BDD a chaque tick
 
-La configuration se fait via `hubs` dans `config.yml`, avec `runtime_report_endpoint`, `websocket_endpoint`, `runtime_report_interval` et éventuellement `agent_token`. Si `websocket_endpoint` est absent sur une ancienne installation mise a jour, l'agent utilise `/api/agent/ws` par defaut.
+La configuration se fait via `hubs` dans `config.yml`, avec `websocket_endpoint`, `runtime_report_interval` et éventuellement `agent_token`. `runtime_report_interval` est la frequence d'echantillonnage live envoyee par WebSocket, par defaut 1 seconde. Si `websocket_endpoint` est absent sur une ancienne installation mise a jour, l'agent utilise `/api/agent/ws` par defaut.
 
-En plus du push HTTP existant, l'agent peut garder une connexion WebSocket persistante vers le hub. Au démarrage, il envoie `hello`, pousse ensuite des messages `runtime_report`, écoute les messages `command`, exécute la commande localement, puis renvoie un `command_result` avec le même `id`.
+Au demarrage, l'agent envoie `hello`, pousse ensuite des messages `runtime_report` en live, ecoute les messages `command`, execute la commande localement, puis renvoie un `command_result` avec le meme `id`. Apres une commande, l'agent renvoie aussi un `runtime_report` immediat pour que le hub voie le nouvel etat sans attendre le prochain tick metrics.
+
+Le push HTTP `runtime_report_endpoint` ne sert plus au live quand WebSocket est actif. Il reste seulement comme fallback explicite si un hub met `websocket_enabled: false`.
 
 Commandes WebSocket supportées :
 

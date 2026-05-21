@@ -12,7 +12,7 @@ from core import config_store
 from services.server_manager import _running
 
 
-DEFAULT_REPORT_INTERVAL_SECONDS = 10
+DEFAULT_REPORT_INTERVAL_SECONDS = 1
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
 
@@ -77,6 +77,13 @@ def _enabled_hub_configs() -> list[dict]:
         })
 
     return enabled_hubs
+
+
+def _http_report_hub_configs() -> list[dict]:
+    return [
+        hub_cfg for hub_cfg in _enabled_hub_configs()
+        if hub_cfg.get('websocket_enabled', True) is False
+    ]
 
 
 def _report_interval() -> int:
@@ -259,7 +266,7 @@ def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
 
 
 def send_runtime_report() -> bool:
-    hub_configs = _enabled_hub_configs()
+    hub_configs = _http_report_hub_configs()
 
     if not hub_configs:
         return False
@@ -300,12 +307,12 @@ def start_runtime_reporter():
     if _reporter_thread and _reporter_thread.is_alive():
         return
 
-    hub_configs = _enabled_hub_configs()
+    hub_configs = _http_report_hub_configs()
     if not any(_runtime_report_url(hub_cfg) and _agent_token(hub_cfg) for hub_cfg in hub_configs):
-        print('[runtime-report] Désactivé: configuration hubs incomplète')
+        print('[runtime-report] Désactivé: WebSocket actif ou configuration HTTP incomplète')
         return
 
     _reporter_stop_event.clear()
     _reporter_thread = threading.Thread(target=_report_loop, daemon=True)
     _reporter_thread.start()
-    print(f'[runtime-report] Activé toutes les {_report_interval()}s vers {len(hub_configs)} hub(s)')
+    print(f'[runtime-report] HTTP fallback activé toutes les {_report_interval()}s vers {len(hub_configs)} hub(s)')

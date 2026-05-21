@@ -73,6 +73,7 @@ def _send_command_result(ws, send_lock: threading.Lock, command_id, future) -> N
             'ok': ok,
             'payload': payload,
         })
+        _send_runtime_report(ws, send_lock)
     except Exception:
         pass
 
