@@ -24,6 +24,8 @@ hubs:
     required: true
     base_url: https://pitlane-evo.fr
     runtime_report_endpoint: /api/agent/runtime-report
+    websocket_endpoint: /api/agent/ws
+    websocket_enabled: true
     runtime_report_interval: 10
     instance_http_timeout: 0.5
 
@@ -37,6 +39,8 @@ hubs:
   #   required: false
   #   base_url: https://your-dev-tunnel.trycloudflare.com
   #   runtime_report_endpoint: /api/agent/runtime-report
+  #   websocket_endpoint: /api/agent/ws
+  #   websocket_enabled: true
   #   runtime_report_interval: 10
   #   instance_http_timeout: 0.5
 

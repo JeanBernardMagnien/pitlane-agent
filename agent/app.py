@@ -9,6 +9,7 @@ from core.system_info import get_system_info
 from routes.instances import register_instance_routes
 from routes.logs import register_log_routes
 from routes.steam import register_steam_routes
+from services.hub_ws_client import start_hub_ws_clients
 from services.runtime_reporter import start_runtime_reporter
 from services.runtime_state import restore_runtime_state
 
@@ -48,6 +49,7 @@ if restored_instances:
 
 app = create_app()
 start_runtime_reporter()
+start_hub_ws_clients()
 
 
 if __name__ == '__main__':

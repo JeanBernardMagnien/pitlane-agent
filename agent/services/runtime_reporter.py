@@ -71,6 +71,9 @@ def _enabled_hub_configs() -> list[dict]:
             'runtime_report_interval': _coerce_report_interval(hub_cfg.get('runtime_report_interval')),
             'instance_http_timeout': _coerce_http_timeout(hub_cfg.get('instance_http_timeout')),
             'agent_token': hub_cfg.get('agent_token', hub_cfg.get('token')),
+            'websocket_enabled': hub_cfg.get('websocket_enabled', hub_cfg.get('ws_enabled', True)),
+            'websocket_url': hub_cfg.get('websocket_url', hub_cfg.get('ws_url')),
+            'websocket_endpoint': hub_cfg.get('websocket_endpoint', hub_cfg.get('ws_endpoint')),
         })
 
     return enabled_hubs
