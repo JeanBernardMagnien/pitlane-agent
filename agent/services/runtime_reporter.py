@@ -51,8 +51,33 @@ def _coerce_http_timeout(value) -> float:
     return max(0.1, min(timeout, 5.0))
 
 
+def _configured_hubs() -> list[dict]:
+    hubs_cfg = config_store.CFG.get('hubs')
+
+    if isinstance(hubs_cfg, list) and hubs_cfg:
+        return hubs_cfg
+
+    legacy_hub = config_store.CFG.get('hub')
+    if isinstance(legacy_hub, dict) and legacy_hub.get('base_url'):
+        return [{
+            'name': legacy_hub.get('name') or 'production',
+            'enabled': legacy_hub.get('enabled', True),
+            'required': legacy_hub.get('required', True),
+            'base_url': legacy_hub.get('base_url'),
+            'runtime_report_endpoint': legacy_hub.get('runtime_report_endpoint') or legacy_hub.get('state_endpoint'),
+            'runtime_report_interval': legacy_hub.get('runtime_report_interval') or legacy_hub.get('monitor_interval'),
+            'instance_http_timeout': legacy_hub.get('instance_http_timeout'),
+            'agent_token': legacy_hub.get('agent_token') or legacy_hub.get('token'),
+            'websocket_enabled': legacy_hub.get('websocket_enabled', legacy_hub.get('ws_enabled', True)),
+            'websocket_url': legacy_hub.get('websocket_url') or legacy_hub.get('ws_url'),
+            'websocket_endpoint': legacy_hub.get('websocket_endpoint') or legacy_hub.get('ws_endpoint'),
+        }]
+
+    return []
+
+
 def _enabled_hub_configs() -> list[dict]:
-    hubs_cfg = config_store.CFG.get('hubs') or []
+    hubs_cfg = _configured_hubs()
     enabled_hubs = []
 
     for index, hub_cfg in enumerate(hubs_cfg):

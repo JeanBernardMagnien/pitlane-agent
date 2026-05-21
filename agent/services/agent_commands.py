@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from core import config_store
+from core.system_info import get_system_info
 from core.firewall import close_ports, open_ports
 from services.current_config_store import (
     load_current_config,
@@ -310,6 +311,7 @@ COMMANDS = {
     'cleanup_instance': cleanup_instance_command,
     'cleanup': cleanup_instance_command,
     'launch_instance': launch_instance_command,
+    'launch_runtime_config': launch_instance_command,
     'launch': launch_instance_command,
     'start_instance': start_instance_command,
     'start': start_instance_command,
@@ -331,6 +333,9 @@ def execute_agent_command(command: str, payload: dict | None = None) -> tuple[di
 
     if command in ('runtime_report', 'get_runtime_report'):
         return build_runtime_report(), 200
+
+    if command in ('system_info', 'get_system_info'):
+        return get_system_info(), 200
 
     if command in ('steam_update_check', 'check_steam_update', 'update_steam_check'):
         return check_steam_update(config_store.CFG.get('steam', {}), payload)
