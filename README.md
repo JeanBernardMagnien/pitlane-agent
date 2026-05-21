@@ -77,9 +77,9 @@ L'agent est responsable de :
 
 ## Push agent vers hub
 
-Le push automatique agent vers hub est prévu pour une étape suivante avec Mercure côté hub.
+L'agent pousse automatiquement son état runtime vers un ou plusieurs hubs.
 
-Objectif futur :
+Chaque hub configuré reçoit :
 
 - heartbeat agent
 - état runtime des instances lancées
@@ -87,7 +87,9 @@ Objectif futur :
 - persistance côté hub
 - diffusion Mercure vers l'interface
 
-Dans cette branche, l'ancien push basé sur `config.yml.instances` est désactivé. Le hub ne doit plus interroger l'agent pour récupérer l'état serveur ou instance.
+La configuration se fait via `hubs` dans `config.yml`, avec `runtime_report_endpoint`, `runtime_report_interval` et éventuellement `agent_token`.
+
+L'ancien push basé sur `config.yml.instances` est désactivé. Le hub ne doit plus interroger l'agent pour récupérer l'état serveur ou instance.
 
 ## API REST
 
