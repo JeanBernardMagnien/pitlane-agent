@@ -8,8 +8,10 @@ from services.agent_commands import execute_agent_command
 from services.runtime_reporter import (
     _agent_token,
     _coerce_report_interval,
+    _coerce_scan_interval,
     _enabled_hub_configs,
     build_runtime_report,
+    runtime_report_signature,
 )
 
 
@@ -47,15 +49,23 @@ def _send_json(ws, send_lock: threading.Lock, payload: dict) -> None:
         ws.send(raw)
 
 
-def _send_runtime_report(ws, send_lock: threading.Lock) -> None:
+def _build_runtime_report() -> dict:
     started = time.perf_counter()
     payload = build_runtime_report()
     payload['agent']['report_duration_ms'] = int((time.perf_counter() - started) * 1000)
+
+    return payload
+
+
+def _send_runtime_report(ws, send_lock: threading.Lock, payload: dict | None = None) -> str:
+    payload = payload or _build_runtime_report()
 
     _send_json(ws, send_lock, {
         'type': 'runtime_report',
         'payload': payload,
     })
+
+    return runtime_report_signature(payload)
 
 
 def _send_command_result(ws, send_lock: threading.Lock, command_id, future) -> None:
@@ -138,6 +148,7 @@ def _run_hub_client(hub_cfg: dict) -> None:
     ws_url = _hub_ws_url(hub_cfg)
     token = _agent_token(hub_cfg)
     interval = _coerce_report_interval(hub_cfg.get('runtime_report_interval'))
+    scan_interval = _coerce_scan_interval(hub_cfg.get('runtime_scan_interval'))
     send_lock = threading.Lock()
     backoff_seconds = 1
 
@@ -149,20 +160,28 @@ def _run_hub_client(hub_cfg: dict) -> None:
         ws = None
         try:
             ws = websocket.create_connection(ws_url, timeout=10)
-            ws.settimeout(1)
+            ws.settimeout(min(scan_interval, 0.2))
 
             _send_json(ws, send_lock, {'type': 'hello', 'token': token})
-            _send_runtime_report(ws, send_lock)
+            last_signature = _send_runtime_report(ws, send_lock)
             print(f'[hub-ws] Connecté à "{hub_name}"')
 
             backoff_seconds = 1
+            next_scan_at = time.monotonic() + scan_interval
             next_report_at = time.monotonic() + interval
 
             while not _stop_event.is_set():
                 now = time.monotonic()
-                if now >= next_report_at:
-                    _send_runtime_report(ws, send_lock)
-                    next_report_at = now + interval
+                if now >= next_scan_at or now >= next_report_at:
+                    payload = _build_runtime_report()
+                    signature = runtime_report_signature(payload)
+                    heartbeat_due = now >= next_report_at
+
+                    if heartbeat_due or signature != last_signature:
+                        last_signature = _send_runtime_report(ws, send_lock, payload)
+                        next_report_at = now + interval
+
+                    next_scan_at = now + scan_interval
 
                 try:
                     raw_message = ws.recv()

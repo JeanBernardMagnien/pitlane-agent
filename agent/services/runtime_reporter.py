@@ -13,6 +13,7 @@ from services.server_manager import _running
 
 
 DEFAULT_REPORT_INTERVAL_SECONDS = 1
+DEFAULT_SCAN_INTERVAL_SECONDS = 0.5
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
 
@@ -42,6 +43,15 @@ def _coerce_report_interval(value) -> int:
     return max(1, interval)
 
 
+def _coerce_scan_interval(value) -> float:
+    try:
+        interval = float(value)
+    except (TypeError, ValueError):
+        interval = DEFAULT_SCAN_INTERVAL_SECONDS
+
+    return max(0.2, min(interval, 5.0))
+
+
 def _coerce_http_timeout(value) -> float:
     try:
         timeout = float(value)
@@ -66,6 +76,7 @@ def _configured_hubs() -> list[dict]:
             'base_url': legacy_hub.get('base_url'),
             'runtime_report_endpoint': legacy_hub.get('runtime_report_endpoint') or legacy_hub.get('state_endpoint'),
             'runtime_report_interval': legacy_hub.get('runtime_report_interval') or legacy_hub.get('monitor_interval'),
+            'runtime_scan_interval': legacy_hub.get('runtime_scan_interval') or legacy_hub.get('monitor_scan_interval'),
             'instance_http_timeout': legacy_hub.get('instance_http_timeout'),
             'agent_token': legacy_hub.get('agent_token') or legacy_hub.get('token'),
             'websocket_enabled': legacy_hub.get('websocket_enabled', legacy_hub.get('ws_enabled', True)),
@@ -94,6 +105,7 @@ def _enabled_hub_configs() -> list[dict]:
             'base_url': hub_cfg.get('base_url'),
             'runtime_report_endpoint': hub_cfg.get('runtime_report_endpoint', DEFAULT_RUNTIME_REPORT_ENDPOINT),
             'runtime_report_interval': _coerce_report_interval(hub_cfg.get('runtime_report_interval')),
+            'runtime_scan_interval': _coerce_scan_interval(hub_cfg.get('runtime_scan_interval')),
             'instance_http_timeout': _coerce_http_timeout(hub_cfg.get('instance_http_timeout')),
             'agent_token': hub_cfg.get('agent_token', hub_cfg.get('token')),
             'websocket_enabled': hub_cfg.get('websocket_enabled', hub_cfg.get('ws_enabled', True)),
@@ -114,6 +126,11 @@ def _http_report_hub_configs() -> list[dict]:
 def _report_interval() -> int:
     intervals = [hub_cfg['runtime_report_interval'] for hub_cfg in _enabled_hub_configs()]
     return min(intervals) if intervals else DEFAULT_REPORT_INTERVAL_SECONDS
+
+
+def _scan_interval() -> float:
+    intervals = [hub_cfg['runtime_scan_interval'] for hub_cfg in _enabled_hub_configs()]
+    return min(intervals) if intervals else DEFAULT_SCAN_INTERVAL_SECONDS
 
 
 def _http_timeout() -> float:
@@ -253,6 +270,32 @@ def build_runtime_report() -> dict:
         },
         'instances': _running_instance_reports(),
     }
+
+
+def runtime_report_signature(payload: dict) -> str:
+    instances = payload.get('instances') if isinstance(payload, dict) else []
+    comparable_instances = []
+
+    if isinstance(instances, list):
+        for item in instances:
+            if not isinstance(item, dict):
+                continue
+
+            comparable_instances.append({
+                'id': str(item.get('id') or ''),
+                'status': item.get('status'),
+                'pid': item.get('pid'),
+                'started_at': item.get('started_at'),
+                'connected_drivers': item.get('connected_drivers'),
+                'http_ok': item.get('http_ok'),
+                'http_error': item.get('http_error'),
+            })
+
+    comparable_instances.sort(key=lambda item: item['id'])
+
+    return json.dumps({
+        'instances': comparable_instances,
+    }, sort_keys=True, separators=(',', ':'))
 
 
 def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
