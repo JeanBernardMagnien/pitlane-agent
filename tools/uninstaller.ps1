@@ -468,7 +468,7 @@ $runBtn.Add_Click({
                 Add-Log "[DRY RUN] Desinstallerait les dependances Python PitLane"
             } else {
                 Add-Log "Desinstallation dependances Python PitLane"
-                python -m pip uninstall -y flask flask-cors pyjwt pyyaml requests psutil waitress 2>$null
+                python -m pip uninstall -y flask flask-cors pyjwt pyyaml requests psutil waitress websocket-client 2>$null
             }
         }
 

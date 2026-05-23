@@ -23,17 +23,9 @@ Les fichiers seront telecharges dans le dossier Windows :
 
 ---
 
-## Telecharger `setup-agent.ps1`
+## Telecharger `setup-agent`
 
-Le .exe : 
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
-```
-
-ou ps1 :
+Le .exe :
 
 ```powershell
 Invoke-WebRequest `
@@ -41,31 +33,45 @@ Invoke-WebRequest `
   -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
 ```
 
----
-
-## Telecharger `setup-full.ps1`
-
-Le .exe : 
+Ou le ps1 :
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-full.ps1"
-```
-
-ou ps1 :
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-full.ps1"
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.ps1" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-agent.ps1"
 ```
 
 ---
 
-## Lancer `setup-agent.ps1`
+## Telecharger `setup-full`
+
+Le .exe :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-full.exe"
+```
+
+Ou le ps1 :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.ps1" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-full.ps1"
+```
+
+---
+
+## Lancer `setup-agent`
 
 A utiliser si AC EVO Dedicated Server est deja installe.
+
+```powershell
+Start-Process "$env:USERPROFILE\Downloads\setup-agent.exe" -Verb RunAs
+```
+
+Ou pour le ps1 :
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\setup-agent.ps1"
@@ -73,9 +79,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\
 
 ---
 
-## Lancer `setup-full.ps1`
+## Lancer `setup-full`
 
 A utiliser sur un serveur vierge ou si AC EVO Dedicated Server n'est pas encore installe.
+
+```powershell
+Start-Process "$env:USERPROFILE\Downloads\setup-full.exe" -Verb RunAs
+```
+
+Ou pour le ps1 :
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\setup-full.ps1"

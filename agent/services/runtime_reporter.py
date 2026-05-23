@@ -12,14 +12,16 @@ from core import config_store
 from services.server_manager import _running
 
 
-DEFAULT_REPORT_INTERVAL_SECONDS = 10
+DEFAULT_REPORT_INTERVAL_SECONDS = 1
+DEFAULT_SCAN_INTERVAL_SECONDS = 0.5
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
+PROCESS_CPU_SAMPLE_INTERVAL_SECONDS = 0.9
 
 
 _reporter_thread = None
 _reporter_stop_event = threading.Event()
-_process_cpu_cache: dict[int, psutil.Process] = {}
+_process_cpu_cache: dict[int, dict] = {}
 
 
 def _utc_now() -> str:
@@ -42,6 +44,15 @@ def _coerce_report_interval(value) -> int:
     return max(1, interval)
 
 
+def _coerce_scan_interval(value) -> float:
+    try:
+        interval = float(value)
+    except (TypeError, ValueError):
+        interval = DEFAULT_SCAN_INTERVAL_SECONDS
+
+    return max(0.2, min(interval, 5.0))
+
+
 def _coerce_http_timeout(value) -> float:
     try:
         timeout = float(value)
@@ -51,8 +62,34 @@ def _coerce_http_timeout(value) -> float:
     return max(0.1, min(timeout, 5.0))
 
 
+def _configured_hubs() -> list[dict]:
+    hubs_cfg = config_store.CFG.get('hubs')
+
+    if isinstance(hubs_cfg, list) and hubs_cfg:
+        return hubs_cfg
+
+    legacy_hub = config_store.CFG.get('hub')
+    if isinstance(legacy_hub, dict) and legacy_hub.get('base_url'):
+        return [{
+            'name': legacy_hub.get('name') or 'production',
+            'enabled': legacy_hub.get('enabled', True),
+            'required': legacy_hub.get('required', True),
+            'base_url': legacy_hub.get('base_url'),
+            'runtime_report_endpoint': legacy_hub.get('runtime_report_endpoint') or legacy_hub.get('state_endpoint'),
+            'runtime_report_interval': legacy_hub.get('runtime_report_interval') or legacy_hub.get('monitor_interval'),
+            'runtime_scan_interval': legacy_hub.get('runtime_scan_interval') or legacy_hub.get('monitor_scan_interval'),
+            'instance_http_timeout': legacy_hub.get('instance_http_timeout'),
+            'agent_token': legacy_hub.get('agent_token') or legacy_hub.get('token'),
+            'websocket_enabled': legacy_hub.get('websocket_enabled', legacy_hub.get('ws_enabled', True)),
+            'websocket_url': legacy_hub.get('websocket_url') or legacy_hub.get('ws_url'),
+            'websocket_endpoint': legacy_hub.get('websocket_endpoint') or legacy_hub.get('ws_endpoint'),
+        }]
+
+    return []
+
+
 def _enabled_hub_configs() -> list[dict]:
-    hubs_cfg = config_store.CFG.get('hubs') or []
+    hubs_cfg = _configured_hubs()
     enabled_hubs = []
 
     for index, hub_cfg in enumerate(hubs_cfg):
@@ -69,16 +106,32 @@ def _enabled_hub_configs() -> list[dict]:
             'base_url': hub_cfg.get('base_url'),
             'runtime_report_endpoint': hub_cfg.get('runtime_report_endpoint', DEFAULT_RUNTIME_REPORT_ENDPOINT),
             'runtime_report_interval': _coerce_report_interval(hub_cfg.get('runtime_report_interval')),
+            'runtime_scan_interval': _coerce_scan_interval(hub_cfg.get('runtime_scan_interval')),
             'instance_http_timeout': _coerce_http_timeout(hub_cfg.get('instance_http_timeout')),
             'agent_token': hub_cfg.get('agent_token', hub_cfg.get('token')),
+            'websocket_enabled': hub_cfg.get('websocket_enabled', hub_cfg.get('ws_enabled', True)),
+            'websocket_url': hub_cfg.get('websocket_url', hub_cfg.get('ws_url')),
+            'websocket_endpoint': hub_cfg.get('websocket_endpoint', hub_cfg.get('ws_endpoint')),
         })
 
     return enabled_hubs
 
 
+def _http_report_hub_configs() -> list[dict]:
+    return [
+        hub_cfg for hub_cfg in _enabled_hub_configs()
+        if hub_cfg.get('websocket_enabled', True) is False
+    ]
+
+
 def _report_interval() -> int:
     intervals = [hub_cfg['runtime_report_interval'] for hub_cfg in _enabled_hub_configs()]
     return min(intervals) if intervals else DEFAULT_REPORT_INTERVAL_SECONDS
+
+
+def _scan_interval() -> float:
+    intervals = [hub_cfg['runtime_scan_interval'] for hub_cfg in _enabled_hub_configs()]
+    return min(intervals) if intervals else DEFAULT_SCAN_INTERVAL_SECONDS
 
 
 def _http_timeout() -> float:
@@ -139,10 +192,36 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
         }
 
 
-def _process_cpu_percent(process: psutil.Process) -> float | None:
+def _process_cpu_percent(pid: int, process: psutil.Process) -> float | None:
     try:
-        return _safe_float(process.cpu_percent(interval=None))
+        now = time.monotonic()
+        cached = _process_cpu_cache.get(pid)
+
+        if cached:
+            process = cached.get('process') or process
+            sampled_at = float(cached.get('sampled_at') or 0)
+
+            if now - sampled_at < PROCESS_CPU_SAMPLE_INTERVAL_SECONDS:
+                return cached.get('value')
+        else:
+            process.cpu_percent(interval=None)
+            _process_cpu_cache[pid] = {
+                'process': process,
+                'sampled_at': now,
+                'value': None,
+            }
+            return None
+
+        value = _safe_float(process.cpu_percent(interval=None))
+        _process_cpu_cache[pid] = {
+            'process': process,
+            'sampled_at': now,
+            'value': value,
+        }
+
+        return value
     except (psutil.NoSuchProcess, psutil.AccessDenied):
+        _process_cpu_cache.pop(pid, None)
         return None
 
 
@@ -172,15 +251,13 @@ def _running_instance_reports() -> list[dict]:
                 uptime_seconds = max(0, int(time.time() - started_ts))
 
             try:
-                ps_proc = _process_cpu_cache.get(pid)
-                if not ps_proc:
-                    ps_proc = psutil.Process(pid)
-                    ps_proc.cpu_percent(interval=None)
-                    _process_cpu_cache[pid] = ps_proc
+                cached = _process_cpu_cache.get(pid)
+                ps_proc = cached.get('process') if cached else psutil.Process(pid)
 
-                cpu_percent = _process_cpu_percent(ps_proc)
+                cpu_percent = _process_cpu_percent(pid, ps_proc)
                 ram_mb = round(ps_proc.memory_info().rss / 1024 / 1024, 1)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
+                _process_cpu_cache.pop(pid, None)
                 status = 'stopped'
                 pid = None
 
@@ -220,6 +297,32 @@ def build_runtime_report() -> dict:
     }
 
 
+def runtime_report_signature(payload: dict) -> str:
+    instances = payload.get('instances') if isinstance(payload, dict) else []
+    comparable_instances = []
+
+    if isinstance(instances, list):
+        for item in instances:
+            if not isinstance(item, dict):
+                continue
+
+            comparable_instances.append({
+                'id': str(item.get('id') or ''),
+                'status': item.get('status'),
+                'pid': item.get('pid'),
+                'started_at': item.get('started_at'),
+                'connected_drivers': item.get('connected_drivers'),
+                'http_ok': item.get('http_ok'),
+                'http_error': item.get('http_error'),
+            })
+
+    comparable_instances.sort(key=lambda item: item['id'])
+
+    return json.dumps({
+        'instances': comparable_instances,
+    }, sort_keys=True, separators=(',', ':'))
+
+
 def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
     url = _runtime_report_url(hub_cfg)
     token = _agent_token(hub_cfg)
@@ -256,7 +359,7 @@ def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
 
 
 def send_runtime_report() -> bool:
-    hub_configs = _enabled_hub_configs()
+    hub_configs = _http_report_hub_configs()
 
     if not hub_configs:
         return False
@@ -297,12 +400,12 @@ def start_runtime_reporter():
     if _reporter_thread and _reporter_thread.is_alive():
         return
 
-    hub_configs = _enabled_hub_configs()
+    hub_configs = _http_report_hub_configs()
     if not any(_runtime_report_url(hub_cfg) and _agent_token(hub_cfg) for hub_cfg in hub_configs):
-        print('[runtime-report] Désactivé: configuration hubs incomplète')
+        print('[runtime-report] Désactivé: WebSocket actif ou configuration HTTP incomplète')
         return
 
     _reporter_stop_event.clear()
     _reporter_thread = threading.Thread(target=_report_loop, daemon=True)
     _reporter_thread.start()
-    print(f'[runtime-report] Activé toutes les {_report_interval()}s vers {len(hub_configs)} hub(s)')
+    print(f'[runtime-report] HTTP fallback activé toutes les {_report_interval()}s vers {len(hub_configs)} hub(s)')

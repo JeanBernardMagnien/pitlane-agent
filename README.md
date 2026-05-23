@@ -6,14 +6,50 @@ L'agent n'est plus propriétaire des instances métier. Le hub PitLane possède 
 
 ## Installation
 
-### AC EVO déjà installé
+### Telechargement direct
+
+Ouvrir PowerShell en administrateur sur le serveur Windows, puis telecharger l'installateur adapte.
+
+AC EVO Dedicated Server deja installe :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\setup-agent.exe" -Verb RunAs
+```
+
+Serveur vierge :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-full.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\setup-full.exe" -Verb RunAs
+```
+
+Outil de reset/desinstallation pour tests :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\uninstaller.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\uninstaller.exe" -Verb RunAs
+```
+
+### Depuis le depot
+
+AC EVO deja installe :
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process
 .\installers\setup-agent.ps1
 ```
 
-### Serveur vierge
+Serveur vierge :
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process
@@ -77,19 +113,57 @@ L'agent est responsable de :
 
 ## Push agent vers hub
 
-L'agent pousse automatiquement son état runtime vers un ou plusieurs hubs.
+L'agent garde une connexion WebSocket persistante vers un ou plusieurs hubs. Ce canal est le chemin live par defaut pour les commandes et les métriques runtime.
 
 Chaque hub configuré reçoit :
 
 - heartbeat agent
 - état runtime des instances lancées
 - infos techniques serveur : CPU, RAM, processus, build local, erreurs
-- persistance côté hub
-- diffusion Mercure vers l'interface
+- diffusion live vers l'interface via le hub
+- stockage live cote hub attendu dans Redis, pas en ecriture BDD a chaque tick
 
-La configuration se fait via `hubs` dans `config.yml`, avec `runtime_report_endpoint`, `runtime_report_interval` et éventuellement `agent_token`.
+La configuration se fait via `hubs` dans `config.yml`, avec `websocket_endpoint`, `runtime_report_interval` et éventuellement `agent_token`. `runtime_report_interval` est la frequence d'echantillonnage live envoyee par WebSocket, par defaut 1 seconde. Si `websocket_endpoint` est absent sur une ancienne installation mise a jour, l'agent utilise `/api/agent/ws` par defaut.
+
+Au demarrage, l'agent envoie `hello`, pousse ensuite des messages `runtime_report` en live, ecoute les messages `command`, execute la commande localement, puis renvoie un `command_result` avec le meme `id`. Apres une commande, l'agent renvoie aussi un `runtime_report` immediat pour que le hub voie le nouvel etat sans attendre le prochain tick metrics.
+
+Le push HTTP `runtime_report_endpoint` ne sert plus au live quand WebSocket est actif. Il reste seulement comme fallback explicite si un hub met `websocket_enabled: false`.
+
+Commandes WebSocket supportées :
+
+- `prepare_instance`
+- `update_instance_network`
+- `cleanup_instance`
+- `launch_instance`
+- `start_instance`
+- `stop_instance`
+- `restart_instance`
+- `get_instance_logs`
+- `steam_update_check`
+- `steam_update`
+- `steam_update_logs`
+- `runtime_report`
 
 L'ancien push basé sur `config.yml.instances` est désactivé. Le hub ne doit plus interroger l'agent pour récupérer l'état serveur ou instance.
+
+## Verification agent
+
+Apres une installation ou une mise a jour, verifier cote serveur Windows :
+
+```powershell
+Get-ScheduledTask -TaskName PitLaneAgent
+python -m pip show websocket-client
+```
+
+L'updater conserve volontairement `config.yml`. Sur une ancienne installation, `websocket_endpoint` peut donc etre absent : c'est normal, l'agent utilise `/api/agent/ws` par defaut.
+
+Puis verifier dans les logs de l'agent que la connexion WebSocket demarre :
+
+```text
+[hub-ws] Connecte a "production"
+```
+
+Si l'agent reste en deconnexion/reconnexion, verifier en priorite que le hub expose bien l'endpoint WebSocket, que le token agent est accepte, et que l'URL `base_url` du hub est accessible depuis le serveur.
 
 ## API REST
 

@@ -13,3 +13,5 @@ __pycache__/
 
 # Logs debug
 debug_*.txt
+AGENTS.md
+PROJECT_STATUS.md
