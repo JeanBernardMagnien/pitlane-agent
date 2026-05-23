@@ -16,11 +16,12 @@ DEFAULT_REPORT_INTERVAL_SECONDS = 1
 DEFAULT_SCAN_INTERVAL_SECONDS = 0.5
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
+PROCESS_CPU_SAMPLE_INTERVAL_SECONDS = 0.9
 
 
 _reporter_thread = None
 _reporter_stop_event = threading.Event()
-_process_cpu_cache: dict[int, psutil.Process] = {}
+_process_cpu_cache: dict[int, dict] = {}
 
 
 def _utc_now() -> str:
@@ -191,10 +192,36 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
         }
 
 
-def _process_cpu_percent(process: psutil.Process) -> float | None:
+def _process_cpu_percent(pid: int, process: psutil.Process) -> float | None:
     try:
-        return _safe_float(process.cpu_percent(interval=None))
+        now = time.monotonic()
+        cached = _process_cpu_cache.get(pid)
+
+        if cached:
+            process = cached.get('process') or process
+            sampled_at = float(cached.get('sampled_at') or 0)
+
+            if now - sampled_at < PROCESS_CPU_SAMPLE_INTERVAL_SECONDS:
+                return cached.get('value')
+        else:
+            process.cpu_percent(interval=None)
+            _process_cpu_cache[pid] = {
+                'process': process,
+                'sampled_at': now,
+                'value': None,
+            }
+            return None
+
+        value = _safe_float(process.cpu_percent(interval=None))
+        _process_cpu_cache[pid] = {
+            'process': process,
+            'sampled_at': now,
+            'value': value,
+        }
+
+        return value
     except (psutil.NoSuchProcess, psutil.AccessDenied):
+        _process_cpu_cache.pop(pid, None)
         return None
 
 
@@ -224,15 +251,13 @@ def _running_instance_reports() -> list[dict]:
                 uptime_seconds = max(0, int(time.time() - started_ts))
 
             try:
-                ps_proc = _process_cpu_cache.get(pid)
-                if not ps_proc:
-                    ps_proc = psutil.Process(pid)
-                    ps_proc.cpu_percent(interval=None)
-                    _process_cpu_cache[pid] = ps_proc
+                cached = _process_cpu_cache.get(pid)
+                ps_proc = cached.get('process') if cached else psutil.Process(pid)
 
-                cpu_percent = _process_cpu_percent(ps_proc)
+                cpu_percent = _process_cpu_percent(pid, ps_proc)
                 ram_mb = round(ps_proc.memory_info().rss / 1024 / 1024, 1)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
+                _process_cpu_cache.pop(pid, None)
                 status = 'stopped'
                 pid = None
 
