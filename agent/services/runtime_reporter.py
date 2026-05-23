@@ -17,7 +17,6 @@ DEFAULT_SCAN_INTERVAL_SECONDS = 0.5
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
 PROCESS_CPU_SAMPLE_INTERVAL_SECONDS = 0.9
-PROCESS_CPU_ZERO_CONFIRMATION_SAMPLES = 2
 
 
 _reporter_thread = None
@@ -210,34 +209,14 @@ def _process_cpu_percent(pid: int, process: psutil.Process) -> float | None:
                 'process': process,
                 'sampled_at': now,
                 'value': None,
-                'zero_samples': 0,
             }
             return None
 
         value = _safe_float(process.cpu_percent(interval=None))
-        previous_value = cached.get('value') if cached else None
-        zero_samples = int(cached.get('zero_samples') or 0) if cached else 0
-
-        if value == 0 and previous_value is not None and previous_value > 0:
-            zero_samples += 1
-
-            if zero_samples < PROCESS_CPU_ZERO_CONFIRMATION_SAMPLES:
-                _process_cpu_cache[pid] = {
-                    'process': process,
-                    'sampled_at': now,
-                    'value': previous_value,
-                    'zero_samples': zero_samples,
-                }
-
-                return previous_value
-        else:
-            zero_samples = 0
-
         _process_cpu_cache[pid] = {
             'process': process,
             'sampled_at': now,
             'value': value,
-            'zero_samples': zero_samples,
         }
 
         return value
