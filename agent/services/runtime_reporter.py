@@ -282,12 +282,16 @@ def _running_instance_reports() -> list[dict]:
 
 def build_runtime_report() -> dict:
     memory = psutil.virtual_memory()
+    cpu_cores = psutil.cpu_count(logical=False) or 1
+    cpu_threads = psutil.cpu_count(logical=True) or cpu_cores
 
     return {
         'agent': {
             'version': '0.2.0',
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
+            'cpu_cores': cpu_cores,
+            'cpu_threads': cpu_threads,
             'cpu_percent': _safe_float(psutil.cpu_percent(interval=None)),
             'ram_total_gb': round(memory.total / 1024 / 1024 / 1024, 2),
             'ram_used_gb': round(memory.used / 1024 / 1024 / 1024, 2),
