@@ -8,37 +8,23 @@ L'agent n'est plus propriétaire des instances métier. Le hub PitLane possède 
 
 ### Telechargement direct
 
-Ouvrir PowerShell en administrateur sur le serveur Windows, puis telecharger l'installateur adapte.
-
-AC EVO Dedicated Server deja installe :
+Ouvrir PowerShell en administrateur sur le serveur Windows, puis lancer l'installateur unique.
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/PitLaneInstaller.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\PitLaneInstaller.exe"
 
-Start-Process "$env:USERPROFILE\Downloads\setup-agent.exe" -Verb RunAs
+Start-Process "$env:USERPROFILE\Downloads\PitLaneInstaller.exe" -Verb RunAs
 ```
 
-Serveur vierge :
+Le launcher detecte AC EVO, SteamCMD, l'agent et le service Windows, puis propose :
 
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\setup-full.exe"
+- installer l'agent seulement
+- faire une installation complete
+- desinstaller / reset
 
-Start-Process "$env:USERPROFILE\Downloads\setup-full.exe" -Verb RunAs
-```
-
-Outil de reset/desinstallation pour tests :
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.exe" `
-  -OutFile "$env:USERPROFILE\Downloads\uninstaller.exe"
-
-Start-Process "$env:USERPROFILE\Downloads\uninstaller.exe" -Verb RunAs
-```
+Les installateurs directs restent disponibles comme assets techniques de release : `setup-agent.exe`, `setup-full.exe`, `uninstaller.exe`, `updater.exe` et `agent.zip`.
 
 ### Depuis le depot
 
@@ -65,6 +51,30 @@ Les scripts installent :
 - le fichier `config.yml` avec les chemins détectés
 
 Les ports des instances AC EVO ne sont plus ouverts à l'installation. Ils sont gérés par le hub lors de la création, modification ou suppression d'une instance.
+
+## Release
+
+Le workflow GitHub Actions `Build and Release` compile automatiquement les executables Windows avec PS2EXE.
+
+Sur un push vers `main`, il produit seulement les artifacts de build pour verification.
+
+Pour publier une release, creer et pousser un tag :
+
+```powershell
+git tag v0.3.0
+git push origin v0.3.0
+```
+
+Le workflow cree alors la release GitHub avec les assets :
+
+- `agent.zip`
+- `PitLaneInstaller.exe`
+- `setup-agent.exe`
+- `setup-full.exe`
+- `updater.exe`
+- `uninstaller.exe`
+
+On peut aussi lancer le workflow manuellement depuis GitHub Actions avec un input `tag` comme `v0.3.0`; dans ce cas la release est creee pour le commit courant.
 
 ## Configuration
 

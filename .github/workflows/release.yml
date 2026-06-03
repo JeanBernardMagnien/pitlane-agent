@@ -1,26 +1,94 @@
-name: Release
+name: Build and Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to create, for example v0.3.0. Leave empty to only build artifacts.'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Créer agent.zip
+      - name: Prepare dist
+        shell: pwsh
         run: |
-          cd agent
-          zip -r ../agent.zip .
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
 
-      - name: Créer la release GitHub
+      - name: Build agent.zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "agent/*" -DestinationPath "dist/agent.zip" -Force
+
+      - name: Install PS2EXE
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module ps2exe -Scope CurrentUser -Force
+
+      - name: Compile installer executables
+        shell: pwsh
+        run: |
+          Invoke-PS2EXE -InputFile "installers/PitLaneInstaller.ps1" -OutputFile "dist/PitLaneInstaller.exe" -NoConsole -NoOutput -NoError
+          Invoke-PS2EXE -InputFile "installers/setup-agent.ps1" -OutputFile "dist/setup-agent.exe" -NoConsole -NoOutput -NoError
+          Invoke-PS2EXE -InputFile "installers/setup-full.ps1" -OutputFile "dist/setup-full.exe" -NoConsole -NoOutput -NoError
+          Invoke-PS2EXE -InputFile "installers/updater.ps1" -OutputFile "dist/updater.exe" -NoConsole -NoOutput -NoError
+          Invoke-PS2EXE -InputFile "tools/uninstaller.ps1" -OutputFile "dist/uninstaller.exe" -NoConsole -NoOutput -NoError
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pitlane-agent-release-assets
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          $tag = ""
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          } elseif ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}".Trim()
+          }
+
+          if ($tag -and -not $tag.StartsWith("v")) {
+            throw "Release tag must start with v, received '$tag'"
+          }
+
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          if ($tag) {
+            Write-Host "Release tag: $tag"
+          } else {
+            Write-Host "No release tag requested. Build artifacts only."
+          }
+
+      - name: Create or update GitHub release
+        if: steps.release_tag.outputs.tag != ''
         uses: softprops/action-gh-release@v2
         with:
-          files: agent.zip
+          tag_name: ${{ steps.release_tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
+          files: |
+            dist/agent.zip
+            dist/PitLaneInstaller.exe
+            dist/setup-agent.exe
+            dist/setup-full.exe
+            dist/updater.exe
+            dist/uninstaller.exe

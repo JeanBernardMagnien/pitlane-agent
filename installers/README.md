@@ -11,6 +11,22 @@ Ce dossier contient les scripts PowerShell permettant d'installer PitLane Agent 
 
 ---
 
+## Installateur recommande
+
+Telecharger et lancer le launcher unique :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/PitLaneInstaller.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\PitLaneInstaller.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\PitLaneInstaller.exe" -Verb RunAs
+```
+
+Le launcher detecte AC EVO, SteamCMD, l'agent et le service Windows, puis propose l'installation agent, l'installation complete ou la desinstallation/reset.
+
+---
+
 ## Telecharger les installateurs
 
 Ouvrir PowerShell sur le serveur Windows, puis executer les commandes suivantes.
