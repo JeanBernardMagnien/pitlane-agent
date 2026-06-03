@@ -118,7 +118,7 @@ ForEach-Object {
 }
 
 Add-Info "Suppression regles firewall PitLane..."
-Get-NetFirewallRule -DisplayName "PitLane -*" -ErrorAction SilentlyContinue |
+Get-NetFirewallRule -DisplayName "PitLane*" -ErrorAction SilentlyContinue |
     Remove-NetFirewallRule -ErrorAction SilentlyContinue
 
 if ($AcEvoPath) {
