@@ -27,6 +27,7 @@ def register_steam_routes(app):
         body = request.get_json(silent=True) or {}
         return _json_response(start_steam_update(
             config_store.CFG.get('steam', {}),
+            config_store.GAME_CFG,
             config_store.LOGGING_CFG,
             body,
         ))
