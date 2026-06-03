@@ -1,4 +1,5 @@
 from copy import deepcopy
+import os
 from pathlib import Path
 
 
@@ -59,8 +60,15 @@ def finalize_launch_config(config: dict, instance_cfg: dict, game_cfg: dict) -> 
     server = cfg.setdefault('Server', {})
 
     install_path = Path(game_cfg['install_path'])
-    results_path = install_path / 'Results' / str(instance_cfg['id'])
+    configured_results_path = game_cfg.get('results_path')
+    results_root = Path(configured_results_path) if configured_results_path else install_path / 'Results'
+    results_path = results_root / str(instance_cfg['id'])
+    results_path.mkdir(parents=True, exist_ok=True)
 
-    server['ResultsPath'] = str(results_path)
+    results_path_value = str(results_path)
+    if not results_path_value.endswith((os.sep, '/', '\\')):
+        results_path_value += os.sep
+
+    server['ResultsPath'] = results_path_value
 
     return cfg

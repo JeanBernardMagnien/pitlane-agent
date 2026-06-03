@@ -64,7 +64,9 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
         "spectator_password": server['SpectatorPassword'],
         "admin_password": server['AdminPassword'],
         "type": server['SelectedServerTypeValue'],
-        "entry_list_path": server['EntryListPath'],
+        "entry_list_url": server.get('EntryListUrl', ''),
+        "entry_list_path": server.get('EntryListPath', ''),
+        "results_post_url": server.get('ResultsPostUrl', ''),
         "results_path": server['ResultsPath']
     }
 

@@ -123,13 +123,22 @@ def check_steam_update(steam_cfg: dict, body: dict) -> tuple[dict, int]:
     }, 200
 
 
-def start_steam_update(steam_cfg: dict, logging_cfg: dict, body: dict) -> tuple[dict, int]:
+def start_steam_update(
+    steam_cfg: dict,
+    game_cfg: dict,
+    logging_cfg: dict,
+    body: dict,
+) -> tuple[dict, int]:
     global _steam_process
 
     logs_path = logging_cfg['logs_path']
     steamcmd_path = steam_cfg.get('steamcmd_path', '')
     if not steamcmd_path:
         return {'error': 'Mise à jour à distance non configurée'}, 503
+
+    install_path = str(game_cfg.get('install_path') or '').strip()
+    if not install_path:
+        return {'error': 'Chemin installation AC EVO non configuré'}, 503
 
     running_instances = [
         iid for iid, info in _running.items()
@@ -147,11 +156,10 @@ def start_steam_update(steam_cfg: dict, logging_cfg: dict, body: dict) -> tuple[
     logs_dir = Path(logs_path)
     logs_dir.mkdir(parents=True, exist_ok=True)
     log_path = logs_dir / 'steam_update.log'
-    steamcmd_dir = str(Path(steamcmd_path).parent)
 
     cmd = [
         steamcmd_path,
-        '+force_install_dir', steamcmd_dir,
+        '+force_install_dir', install_path,
         '+login', username, password,
         '+app_update', app_id, 'validate',
         '+quit',
@@ -180,9 +188,10 @@ def start_steam_update(steam_cfg: dict, logging_cfg: dict, body: dict) -> tuple[
             'process': process,
             'pid': process.pid,
             'log_path': str(log_path),
+            'install_path': install_path,
         }
 
-    return {'status': 'started', 'pid': process.pid}, 202
+    return {'status': 'started', 'pid': process.pid, 'install_path': install_path}, 202
 
 
 def get_steam_update_logs(logging_cfg: dict) -> tuple[dict, int]:
@@ -207,6 +216,7 @@ def get_steam_update_logs(logging_cfg: dict) -> tuple[dict, int]:
                 'pid': steam_state.get('pid'),
                 'log_path': str(log_path),
                 'log_size': None,
+                'install_path': steam_state.get('install_path'),
             }, 200
 
         proc = steam_state.get('process')
@@ -230,6 +240,7 @@ def get_steam_update_logs(logging_cfg: dict) -> tuple[dict, int]:
             'pid': steam_state.get('pid'),
             'log_path': str(log_path),
             'log_size': log_size,
+            'install_path': steam_state.get('install_path'),
         }, 200
 
     except Exception as e:
