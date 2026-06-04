@@ -45,7 +45,7 @@ Le .exe :
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-agent.exe" `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/setup-agent.exe" `
   -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
 ```
 
@@ -65,7 +65,7 @@ Le .exe :
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/installers/setup-full.exe" `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/setup-full.exe" `
   -OutFile "$env:USERPROFILE\Downloads\setup-full.exe"
 ```
 

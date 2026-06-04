@@ -26,7 +26,7 @@ Le .exe
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.exe" `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/uninstaller.exe" `
   -OutFile "$env:USERPROFILE\Downloads\uninstaller.exe"
 ```
 ou le ps1

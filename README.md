@@ -1,14 +1,29 @@
 # PitLane Agent
 
-Agent léger installé sur chaque serveur Windows de jeu Assetto Corsa EVO.
+Agent léger installé sur chaque serveur Windows dédié Assetto Corsa EVO.
 
-L'agent n'est plus propriétaire des instances métier. Le hub PitLane possède les serveurs, les instances, les ports et les presets. L'agent exécute les commandes reçues, prépare le réseau local, lance les processus AC EVO et expose les logs.
+Il s'enregistre auprès du hub PitLane via WebSocket, exécute les commandes reçues (démarrage/arrêt d'instances, gestion du firewall, mises à jour SteamCMD) et remonte en temps réel les métriques serveur et l'état des instances.
+
+Le hub est propriétaire de toute la logique métier (serveurs, instances, ports, presets). L'agent exécute uniquement les effets techniques demandés.
+
+---
+
+## Prérequis
+
+- Windows Server 2019 / 2022 ou Windows 10/11 (64 bits)
+- PowerShell 5.1 ou supérieur
+- Droits administrateur
+- Accès Internet (téléchargement initial uniquement)
+
+Python 3 et les dépendances Python sont installés automatiquement par les scripts si absents.
+
+---
 
 ## Installation
 
-### Telechargement direct
+### Méthode recommandée — launcher unique
 
-Ouvrir PowerShell en administrateur sur le serveur Windows, puis lancer l'installateur unique.
+Ouvrir **PowerShell en administrateur** sur le serveur Windows et exécuter :
 
 ```powershell
 Invoke-WebRequest `
@@ -18,17 +33,41 @@ Invoke-WebRequest `
 Start-Process "$env:USERPROFILE\Downloads\PitLaneInstaller.exe" -Verb RunAs
 ```
 
-Le launcher detecte AC EVO, SteamCMD, l'agent et le service Windows, puis propose :
+Le launcher détecte l'état du serveur (AC EVO, SteamCMD, agent, service Windows) et propose :
 
-- installer l'agent seulement
-- faire une installation complete
-- desinstaller / reset
+| Option | Usage |
+|---|---|
+| Installer l'agent seulement | AC EVO Dedicated Server est déjà installé |
+| Installation complète | Serveur vierge — installe SteamCMD, AC EVO et l'agent |
+| Désinstaller / reset | Supprime l'agent et le service Windows |
 
-Les installateurs directs restent disponibles comme assets techniques de release : `setup-agent.exe`, `setup-full.exe`, `uninstaller.exe`, `updater.exe` et `agent.zip`.
+### Méthode alternative — installateurs directs
 
-### Depuis le depot
+Si le launcher n'est pas utilisable, télécharger et lancer l'installateur adapté.
 
-AC EVO deja installe :
+**Agent seulement** (AC EVO déjà installé) :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/setup-agent.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-agent.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\setup-agent.exe" -Verb RunAs
+```
+
+**Installation complète** (serveur vierge) :
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/setup-full.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\setup-full.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\setup-full.exe" -Verb RunAs
+```
+
+### Méthode depuis le dépôt (développement)
+
+AC EVO déjà installé :
 
 ```powershell
 Set-ExecutionPolicy Bypass -Scope Process
@@ -42,144 +81,182 @@ Set-ExecutionPolicy Bypass -Scope Process
 .\installers\setup-full.ps1
 ```
 
-Les scripts installent :
+### Ce qu'installe chaque script
 
-- Python 3 si absent
-- les dépendances Python
-- la tâche planifiée Windows `PitLaneAgent`
-- la règle firewall de l'API agent `TCP/8181`
-- le fichier `config.yml` avec les chemins détectés
+- Python 3 (si absent)
+- Les dépendances Python (`requirements.txt`)
+- La tâche planifiée Windows `PitLaneAgent` (démarre l'agent au démarrage)
+- La règle firewall entrante TCP/8181 pour l'API agent
+- Le fichier `agent/config.yml` avec les chemins détectés automatiquement
 
-Les ports des instances AC EVO ne sont plus ouverts à l'installation. Ils sont gérés par le hub lors de la création, modification ou suppression d'une instance.
+Les ports des instances AC EVO ne sont **pas** ouverts à l'installation. Ils sont gérés dynamiquement par le hub lors de la création, modification ou suppression d'une instance.
 
-## Release
+---
 
-Le workflow GitHub Actions `Build and Release` compile automatiquement les executables Windows avec PS2EXE.
-
-Sur un push vers `main`, il produit seulement les artifacts de build pour verification.
-
-Pour publier une release, creer et pousser un tag :
+## Mise à jour
 
 ```powershell
-git tag v0.3.0
-git push origin v0.3.0
+Invoke-WebRequest `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/updater.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\updater.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\updater.exe" -Verb RunAs
 ```
 
-Le workflow cree alors la release GitHub avec les assets :
+L'updater remplace les fichiers agent et relance le service. Il **conserve** `config.yml`.
 
-- `agent.zip`
-- `PitLaneInstaller.exe`
-- `setup-agent.exe`
-- `setup-full.exe`
-- `updater.exe`
-- `uninstaller.exe`
+---
 
-On peut aussi lancer le workflow manuellement depuis GitHub Actions avec un input `tag` comme `v0.3.0`; dans ce cas la release est creee pour le commit courant.
+## Désinstallation
+
+```powershell
+Invoke-WebRequest `
+  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/uninstaller.exe" `
+  -OutFile "$env:USERPROFILE\Downloads\uninstaller.exe"
+
+Start-Process "$env:USERPROFILE\Downloads\uninstaller.exe" -Verb RunAs
+```
+
+---
 
 ## Configuration
 
-Après installation, le fichier principal est :
+Après installation, le fichier de configuration est :
 
 ```text
 agent/config.yml
 ```
 
-Il contient les chemins machine/runtime :
+Il est généré à partir de `agent/config.template.yml`. Les chemins sont détectés automatiquement à l'installation ; seul le `jwt_secret` doit correspondre à celui configuré côté hub.
 
-- URL publique de l'agent
-- secret JWT partagé
-- chemin d'installation AC EVO
-- chemin global des configs
-- chemin global des résultats
-- chemin global des logs
-- chemin SteamCMD
-- chemin appmanifest
+```yaml
+http:
+  host: 0.0.0.0
+  port: 8181
+  base_url: https://mon-serveur.example.com  # URL publique de l'agent
 
-Il ne contient plus de section `instances`.
+game:
+  install_path: C:\ACEVOServer
+  executable_name: AssettoCorsaEVOServer.exe
+  configs_path: C:\ACEVOServer\configs
+  results_path: C:\ACEVOServer\results
 
-## Responsabilités
+steam:
+  steamcmd_path: C:\SteamCMD\steamcmd.exe
+  app_id: 4564210
+  appmanifest_path: C:\SteamCMD\steamapps\appmanifest_4564210.acf
 
-### Hub
+hubs:
+  - name: my-hub
+    enabled: true
+    required: true
+    base_url: https://your-hub.example.com
+    runtime_report_endpoint: /api/agent/runtime-report
+    websocket_endpoint: /api/agent/ws
+    websocket_enabled: true
+    runtime_report_interval: 1      # secondes entre chaque envoi de métriques live
+    runtime_scan_interval: 0.5
+    instance_http_timeout: 0.5
+    # agent_token: token-dédié       # optionnel, utilise jwt_secret si absent
 
-Le hub est propriétaire de :
+auth:
+  jwt_secret: CHANGEME
+  jwt_algorithm: HS256
 
-- la liste des serveurs
-- la liste des instances
-- les ports TCP/UDP/HTTP
-- les presets/sessions
-- les décisions de création/modification/suppression
-- l'état serveur/instance affiché dans l'interface
+logging:
+  logs_path: C:\ACEVOServer\logs
+  max_lines: 500
+```
 
-### Agent
+Le fichier `config.yml` est **rechargé à chaud** : toute modification est prise en compte sans redémarrer l'agent.
 
-L'agent est responsable de :
+Il est possible de déclarer plusieurs hubs (production + dev local) dans la section `hubs`.
 
-- exposer une API locale sécurisée
-- ouvrir/fermer les ports demandés par le hub
-- lancer/arrêter/redémarrer un processus AC EVO
-- appliquer les chemins runtime nécessaires
-- exposer les logs
-- exécuter SteamCMD pour les mises à jour/vérifications
+---
 
-## Push agent vers hub
+## Vérification après installation
 
-L'agent garde une connexion WebSocket persistante vers un ou plusieurs hubs. Ce canal est le chemin live par defaut pour les commandes et les métriques runtime.
-
-Chaque hub configuré reçoit :
-
-- heartbeat agent
-- état runtime des instances lancées
-- infos techniques serveur : CPU, RAM, processus, build local, erreurs
-- diffusion live vers l'interface via le hub
-- stockage live cote hub attendu dans Redis, pas en ecriture BDD a chaque tick
-
-La configuration se fait via `hubs` dans `config.yml`, avec `websocket_endpoint`, `runtime_report_interval` et éventuellement `agent_token`. `runtime_report_interval` est la frequence d'echantillonnage live envoyee par WebSocket, par defaut 1 seconde. Si `websocket_endpoint` est absent sur une ancienne installation mise a jour, l'agent utilise `/api/agent/ws` par defaut.
-
-Au demarrage, l'agent envoie `hello`, pousse ensuite des messages `runtime_report` en live, ecoute les messages `command`, execute la commande localement, puis renvoie un `command_result` avec le meme `id`. Apres une commande, l'agent renvoie aussi un `runtime_report` immediat pour que le hub voie le nouvel etat sans attendre le prochain tick metrics.
-
-Le push HTTP `runtime_report_endpoint` ne sert plus au live quand WebSocket est actif. Il reste seulement comme fallback explicite si un hub met `websocket_enabled: false`.
-
-Commandes WebSocket supportées :
-
-- `prepare_instance`
-- `update_instance_network`
-- `cleanup_instance`
-- `launch_instance`
-- `start_instance`
-- `stop_instance`
-- `restart_instance`
-- `get_instance_logs`
-- `steam_update_check`
-- `steam_update`
-- `steam_update_logs`
-- `runtime_report`
-
-L'ancien push basé sur `config.yml.instances` est désactivé. Le hub ne doit plus interroger l'agent pour récupérer l'état serveur ou instance.
-
-## Verification agent
-
-Apres une installation ou une mise a jour, verifier cote serveur Windows :
+Vérifier que la tâche planifiée existe et que `websocket-client` est installé :
 
 ```powershell
 Get-ScheduledTask -TaskName PitLaneAgent
 python -m pip show websocket-client
 ```
 
-L'updater conserve volontairement `config.yml`. Sur une ancienne installation, `websocket_endpoint` peut donc etre absent : c'est normal, l'agent utilise `/api/agent/ws` par defaut.
-
-Puis verifier dans les logs de l'agent que la connexion WebSocket demarre :
+Puis vérifier dans les logs de l'agent que la connexion WebSocket est établie :
 
 ```text
-[hub-ws] Connecte a "production"
+[hub-ws] Connecte a "my-hub"
 ```
 
-Si l'agent reste en deconnexion/reconnexion, verifier en priorite que le hub expose bien l'endpoint WebSocket, que le token agent est accepte, et que l'URL `base_url` du hub est accessible depuis le serveur.
+Si l'agent reste en boucle déconnexion/reconnexion, vérifier en priorité :
+
+- que le hub expose bien l'endpoint WebSocket (`/api/agent/ws`)
+- que le `jwt_secret` (ou `agent_token`) est identique côté hub et côté agent
+- que l'URL `base_url` du hub est accessible depuis le serveur Windows
+
+---
+
+## Responsabilités
+
+### Hub
+
+- Propriétaire de la liste des serveurs, instances, ports, presets et sessions
+- Décide des actions (création, modification, suppression)
+- Affiche l'état serveur/instance dans l'interface
+- Stocke les métriques live dans Redis
+
+### Agent
+
+- Expose une API locale sécurisée par JWT (TCP/8181)
+- Maintient une connexion WebSocket persistante vers chaque hub configuré
+- Remonte heartbeat, métriques CPU/RAM/processus et état des instances en temps réel
+- Ouvre/ferme les ports firewall sur demande du hub
+- Lance, arrête et redémarre les processus AC EVO
+- Exécute SteamCMD pour les mises à jour et vérifications de build
+- Expose les logs des instances (REST + WebSocket streaming)
+
+---
+
+## Communication WebSocket
+
+L'agent maintient une connexion WebSocket persistante vers chaque hub avec `websocket_enabled: true`.
+
+### Messages envoyés par l'agent
+
+| Message | Déclencheur |
+|---|---|
+| `hello` | Connexion initiale |
+| `runtime_report` | Chaque tick (`runtime_report_interval`) + après chaque commande |
+
+### Commandes reçues par l'agent
+
+| Commande | Action |
+|---|---|
+| `prepare_instance` | Ouvre les ports firewall |
+| `update_instance_network` | Remplace les règles firewall existantes |
+| `cleanup_instance` | Ferme les ports (refuse si l'instance tourne) |
+| `launch_instance` | Lance l'instance avec une config runtime fournie |
+| `start_instance` | Démarre avec la dernière config runtime en mémoire |
+| `stop_instance` | Arrête le processus |
+| `restart_instance` | Redémarre avec une config runtime fournie |
+| `get_instance_logs` | Retourne les dernières lignes de log |
+| `steam_update_check` | Compare le build local et le build distant |
+| `steam_update` | Lance la mise à jour via SteamCMD |
+| `steam_update_logs` | Retourne les logs SteamCMD |
+| `runtime_report` | Retourne immédiatement un rapport runtime |
+
+L'agent répond à chaque commande avec un message `command_result` portant le même `id`.
+
+Le push HTTP `runtime_report_endpoint` n'est utilisé que si `websocket_enabled: false` est explicitement configuré sur un hub (fallback).
+
+---
 
 ## API REST
 
-Toutes les routes agent requièrent :
+Toutes les routes requièrent :
 
-```text
+```
 Authorization: Bearer <token>
 ```
 
@@ -187,42 +264,30 @@ Authorization: Bearer <token>
 
 | Méthode | Route | Description |
 |---|---|---|
-| GET | `/api/system` | Infos système ponctuelles |
+| GET | `/api/system` | Infos système ponctuelles (CPU, RAM, OS, build) |
 
-### Provisioning technique instance
+### Provisioning réseau instance
 
-Ces routes ne créent pas d'instance métier dans l'agent. Elles appliquent uniquement les effets techniques demandés par le hub.
+Ces routes appliquent uniquement les effets firewall demandés par le hub. Elles ne créent pas d'objet instance dans l'agent.
 
 | Méthode | Route | Description |
 |---|---|---|
-| POST | `/api/instances/{id}/prepare` | Prépare les ports firewall |
-| PUT | `/api/instances/{id}/network` | Remplace les anciennes règles firewall par les nouvelles |
-| POST | `/api/instances/{id}/cleanup` | Nettoie les règles firewall et refuse si l'instance tourne |
+| POST | `/api/instances/{id}/prepare` | Ouvre les ports firewall TCP/UDP/HTTP |
+| PUT | `/api/instances/{id}/network` | Remplace les règles firewall existantes par les nouvelles |
+| POST | `/api/instances/{id}/cleanup` | Ferme les ports (erreur si l'instance tourne) |
 
 ### Commandes runtime instance
 
-Le hub fournit l'instance complète dans le payload quand l'agent doit agir.
+Le hub fournit l'instance complète dans le payload.
 
 | Méthode | Route | Description |
 |---|---|---|
-| POST | `/api/instances/{id}/launch` | Lance une instance avec une config runtime fournie |
-| POST | `/api/instances/{id}/start` | Démarre une instance avec la dernière config runtime courante |
-| POST | `/api/instances/{id}/stop` | Arrête une instance |
-| POST | `/api/instances/{id}/restart` | Redémarre une instance avec une config runtime fournie |
+| POST | `/api/instances/{id}/launch` | Lance avec une config runtime fournie |
+| POST | `/api/instances/{id}/start` | Démarre avec la dernière config runtime en mémoire |
+| POST | `/api/instances/{id}/stop` | Arrête l'instance |
+| POST | `/api/instances/{id}/restart` | Redémarre avec une config runtime fournie |
 | GET | `/api/instances/{id}/logs` | Dernières lignes de log |
-| WS | `/api/instances/{id}/logs/stream` | Logs en temps réel |
-
-Les anciennes routes de lecture/synchro/CRUD instance ne sont plus exposées :
-
-| Méthode | Route |
-|---|---|
-| GET | `/api/instances` |
-| POST | `/api/instances` |
-| GET | `/api/instances/{id}` |
-| PUT | `/api/instances/{id}` |
-| DELETE | `/api/instances/{id}` |
-| GET | `/api/instances/{id}/status` |
-| POST | `/api/instances/{id}/switch` |
+| WS | `/api/instances/{id}/logs/stream` | Streaming live des logs |
 
 ### Configs
 
@@ -238,13 +303,41 @@ Les anciennes routes de lecture/synchro/CRUD instance ne sont plus exposées :
 | Méthode | Route | Description |
 |---|---|---|
 | POST | `/api/steam/update` | Déclenche la mise à jour AC EVO via SteamCMD |
-| GET | `/api/steam/update/logs` | Logs SteamCMD |
+| GET | `/api/steam/update/logs` | Logs de la dernière mise à jour SteamCMD |
 | POST | `/api/steam/update-check` | Compare build local et build distant |
+
+---
 
 ## Logs
 
 ```text
 logs/
-├── log_<instance_id>_YYYY-MM-DD_HH-MM-SS.log
-└── steam_update.log
+├── log_<instance_id>_YYYY-MM-DD_HH-MM-SS.log   # log par instance
+└── steam_update.log                              # log SteamCMD
 ```
+
+---
+
+## Release (workflow GitHub Actions)
+
+Sur un push vers `main`, le workflow produit les artifacts de build uniquement (pas de release publique).
+
+Pour publier une release, créer et pousser un tag :
+
+```powershell
+git tag v0.4.0
+git push origin v0.4.0
+```
+
+Le workflow crée alors la release GitHub avec les assets suivants :
+
+| Asset | Description |
+|---|---|
+| `PitLaneInstaller.exe` | Launcher recommandé — détection + menu interactif |
+| `setup-agent.exe` | Installation agent seulement |
+| `setup-full.exe` | Installation complète (SteamCMD + AC EVO + agent) |
+| `updater.exe` | Mise à jour de l'agent |
+| `uninstaller.exe` | Désinstallation |
+| `agent.zip` | Archive des sources agent (utilisée par les scripts) |
+
+Le workflow peut aussi être déclenché manuellement depuis GitHub Actions avec un input `tag` (ex. `v0.4.0`) pour créer la release sur le commit courant.

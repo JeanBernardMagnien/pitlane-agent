@@ -15,3 +15,6 @@ __pycache__/
 debug_*.txt
 AGENTS.md
 PROJECT_STATUS.md
+# Generated release executables
+installers/*.exe
+tools/*.exe

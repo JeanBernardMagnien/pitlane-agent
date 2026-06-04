@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Prepare dist
         shell: pwsh
@@ -50,7 +50,7 @@ jobs:
           Invoke-PS2EXE -InputFile "tools/uninstaller.ps1" -OutputFile "dist/uninstaller.exe" -NoConsole -NoOutput -NoError
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: pitlane-agent-release-assets
           path: dist/*
@@ -80,7 +80,7 @@ jobs:
 
       - name: Create or update GitHub release
         if: steps.release_tag.outputs.tag != ''
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ steps.release_tag.outputs.tag }}
           target_commitish: ${{ github.sha }}
