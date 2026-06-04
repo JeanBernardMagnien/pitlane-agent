@@ -34,6 +34,7 @@ function Find-AcEvoServer {
 
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
     foreach ($drive in $drives) {
+        [System.Windows.Forms.Application]::DoEvents()
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
             -Recurse -Depth 6 -ErrorAction SilentlyContinue |
             Select-Object -First 1
@@ -124,10 +125,12 @@ function Update-StateView {
 function Get-AssetPath {
     param([string]$FileName)
 
-    $localPath = Join-Path $PSScriptRoot $FileName
-    if (Test-Path $localPath) {
-        Add-Log "Asset local utilise : $localPath"
-        return $localPath
+    if ($PSScriptRoot) {
+        $localPath = Join-Path $PSScriptRoot $FileName
+        if (Test-Path $localPath) {
+            Add-Log "Asset local utilise : $localPath"
+            return $localPath
+        }
     }
 
     New-Item -ItemType Directory -Path $DownloadDir -Force | Out-Null
@@ -285,6 +288,10 @@ $form.Controls.Add($logBox)
 
 $form.Add_Shown({
     $form.Activate()
+    $acLabel.Text    = "AC EVO : Recherche en cours..."
+    $agentLabel.Text = "Agent : Recherche en cours..."
+    $steamLabel.Text = "SteamCMD : Recherche en cours..."
+    [System.Windows.Forms.Application]::DoEvents()
     Update-StateView
 })
 

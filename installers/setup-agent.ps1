@@ -6,12 +6,26 @@ Add-Type -AssemblyName System.Drawing
 # Utility functions
 
 function Find-AcEvoServer {
+    $knownPaths = @(
+        "C:\SteamCMD\steamapps\common",
+        "D:\SteamCMD\steamapps\common",
+        "C:\steamcmd\steamapps\common",
+        "D:\steamcmd\steamapps\common"
+    )
+
+    foreach ($path in $knownPaths) {
+        if (-not (Test-Path $path)) { continue }
+        $found = Get-ChildItem -Path $path -Filter "AssettoCorsaEVOServer.exe" `
+            -Recurse -Depth 3 -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { return $found.DirectoryName }
+    }
+
     $drives = (Get-PSDrive -PSProvider FileSystem).Root
     foreach ($drive in $drives) {
         $found = Get-ChildItem -Path $drive -Filter "AssettoCorsaEVOServer.exe" `
             -Recurse -Depth 6 -ErrorAction SilentlyContinue |
             Select-Object -First 1
-
         if ($found) { return $found.DirectoryName }
     }
     return $null
@@ -213,13 +227,6 @@ function Get-PublicIp {
     } catch {
         return "IP_A_REMPLACER"
     }
-}
-
-function Escape-ForYamlPath {
-    param([string]$Path)
-
-    if (-not $Path) { return "" }
-    return $Path -replace '\\', '\\'
 }
 
 # AcEvoPath sera resolu dans Add_Shown pour ne pas bloquer avant l'apparition du formulaire
@@ -451,17 +458,17 @@ $form.Add_Shown({
     $BaseUrl = "http://$publicIp"
     $AgentUrl = "http://$publicIp`:8181"
 
-    $configContent = Get-Content "$AgentPath/config.template.yml" -Raw
+    $configContent = Get-Content "$AgentPath\config.template.yml" -Raw
     $configContent = $configContent.Replace("__BASE_URL__", $BaseUrl)
     $configContent = $configContent.Replace("__INSTALL_PATH__", $AcEvoPath)
-    $configContent = $configContent.Replace("__CONFIGS_PATH__", "$AcEvoPath/configs")
-    $configContent = $configContent.Replace("__RESULTS_PATH__", "$AcEvoPath/Results")
-    $configContent = $configContent.Replace("__LOGS_PATH__", "$AcEvoPath/logs")
+    $configContent = $configContent.Replace("__CONFIGS_PATH__", "$AcEvoPath\configs")
+    $configContent = $configContent.Replace("__RESULTS_PATH__", "$AcEvoPath\Results")
+    $configContent = $configContent.Replace("__LOGS_PATH__", "$AcEvoPath\logs")
     $configContent = $configContent.Replace("__STEAMCMD_PATH__", $SteamCmdExe)
     $configContent = $configContent.Replace("__APPMANIFEST_PATH__", $AppManifestPath)
     $configContent = $configContent.Replace("__JWT_SECRET__", $JwtSecret)
-    Set-Content -Path "$AgentPath/config.yml" -Value $configContent -Encoding UTF8
-    Remove-Item "$AgentPath/config.template.yml" -Force -ErrorAction SilentlyContinue
+    Set-Content -Path "$AgentPath\config.yml" -Value $configContent -Encoding UTF8
+    Remove-Item "$AgentPath\config.template.yml" -Force -ErrorAction SilentlyContinue
 
     foreach ($dir in @("$AcEvoPath\configs", "$AcEvoPath\Results", "$AcEvoPath\logs")) {
         if (-not (Test-Path $dir)) {
