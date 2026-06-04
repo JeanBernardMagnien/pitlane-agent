@@ -222,16 +222,8 @@ function Escape-ForYamlPath {
     return $Path -replace '\\', '\\'
 }
 
-# Pre-check
-
-$AcEvoPath = Find-AcEvoServer
-if (-not $AcEvoPath) {
-    [System.Windows.Forms.MessageBox]::Show(
-        "AC EVO Dedicated Server introuvable. Lance setup-full.ps1 pour une installation complete.",
-        "Erreur", "OK", "Error"
-    )
-    exit 1
-}
+# AcEvoPath sera resolu dans Add_Shown pour ne pas bloquer avant l'apparition du formulaire
+$AcEvoPath = $null
 
 # Main UI
 
@@ -347,6 +339,16 @@ $form.Add_Shown({
 
     # [1] Detection AC EVO
     Set-StepStatus 0 "running"
+    $AcEvoPath = Find-AcEvoServer
+    if (-not $AcEvoPath) {
+        Set-StepStatus 0 "error"
+        [System.Windows.Forms.MessageBox]::Show(
+            "AC EVO Dedicated Server introuvable. Lance setup-full.ps1 pour une installation complete.",
+            "Erreur", "OK", "Error"
+        )
+        $form.Close()
+        return
+    }
     $AgentPath = "$AcEvoPath\pitlane-agent"
     Add-Log "AC EVO detecte : $AcEvoPath"
     Set-StepStatus 0 "ok"

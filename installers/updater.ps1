@@ -146,29 +146,44 @@ function Remove-AgentContent {
 function Stop-AgentTask {
     param([string]$TaskName)
 
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if (-not $task) {
-        Add-Log "Tache planifiee $TaskName introuvable, arret ignore"
-        return $false
+    $service = Get-Service -Name $TaskName -ErrorAction SilentlyContinue
+    if ($service) {
+        Add-Log "Arret du service Windows $TaskName"
+        Stop-Service -Name $TaskName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        return $true
     }
 
-    Add-Log "Arret de la tache planifiee $TaskName"
-    Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 2
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Add-Log "Arret de la tache planifiee $TaskName"
+        Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+        return $true
+    }
 
-    return $true
+    Add-Log "$TaskName introuvable (service et tache planifiee), arret ignore"
+    return $false
 }
 
 function Start-AgentTask {
     param([string]$TaskName)
 
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if (-not $task) {
-        throw "Tache planifiee $TaskName introuvable, impossible de relancer l'agent."
+    $service = Get-Service -Name $TaskName -ErrorAction SilentlyContinue
+    if ($service) {
+        Add-Log "Relance du service Windows $TaskName"
+        Start-Service -Name $TaskName -ErrorAction Stop
+        return
     }
 
-    Add-Log "Relance de la tache planifiee $TaskName"
-    Start-ScheduledTask -TaskName $TaskName
+    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    if ($task) {
+        Add-Log "Relance de la tache planifiee $TaskName"
+        Start-ScheduledTask -TaskName $TaskName
+        return
+    }
+
+    throw "$TaskName introuvable (service et tache planifiee), impossible de relancer l'agent."
 }
 
 function Get-LatestReleaseInfo {
