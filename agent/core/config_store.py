@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 
-CONFIG_PATH = Path('config.yml')
+CONFIG_PATH = Path(__file__).resolve().parent.parent / 'config.yml'
 _config_lock = threading.Lock()
 _config_mtime = CONFIG_PATH.stat().st_mtime
 CFG = {}
