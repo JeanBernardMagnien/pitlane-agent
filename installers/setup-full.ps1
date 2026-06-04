@@ -3,6 +3,11 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+$RepoOwner = "JeanBernardMagnien"
+$RepoName = "pitlane-agent"
+$ReleaseZipUrl = "https://github.com/$RepoOwner/$RepoName/releases/latest/download/agent.zip"
+$LatestReleaseApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+
 # Utility functions
 
 function Find-AcEvoServer {
@@ -79,7 +84,6 @@ function Find-SteamCmd {
 function Download-Agent {
     param($DestinationPath)
 
-    $url = "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/agent.zip"
     $zip = "$env:TEMP\pitlane-agent.zip"
 
     if (Test-Path $DestinationPath) {
@@ -88,9 +92,45 @@ function Download-Agent {
 
     New-Item -ItemType Directory -Path $DestinationPath -Force | Out-Null
 
-    Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+    Invoke-WebRequest -Uri $ReleaseZipUrl -OutFile $zip -UseBasicParsing
     Expand-Archive -Path $zip -DestinationPath $DestinationPath -Force
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
+}
+
+
+function Get-LatestReleaseInfo {
+    try {
+        return Invoke-RestMethod -Uri $LatestReleaseApiUrl -UseBasicParsing -Headers @{ "User-Agent" = "PitLaneAgentInstaller" }
+    } catch {
+        Add-Log "Impossible de recuperer les infos de release GitHub : $_"
+        return $null
+    }
+}
+
+function Write-VersionFile {
+    param(
+        [string]$AgentPath,
+        $ReleaseInfo
+    )
+
+    $versionPath = Join-Path $AgentPath "version.json"
+
+    $data = [ordered]@{
+        installed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        source = "github_release"
+        asset = "agent.zip"
+        release_url = $ReleaseZipUrl
+    }
+
+    if ($ReleaseInfo) {
+        $data.tag_name = $ReleaseInfo.tag_name
+        $data.name = $ReleaseInfo.name
+        $data.published_at = $ReleaseInfo.published_at
+        $data.html_url = $ReleaseInfo.html_url
+    }
+
+    ($data | ConvertTo-Json -Depth 4) | Set-Content -Path $versionPath -Encoding UTF8
+    Add-Log "version.json mis a jour"
 }
 
 function Install-AgentUpdater {
@@ -553,6 +593,7 @@ $form.Add_Shown({
 
     Add-Log "config.yml genere"
     Add-Log "config.template.yml supprime"
+    Write-VersionFile -AgentPath $AgentPath -ReleaseInfo (Get-LatestReleaseInfo)
     Set-StepStatus 8 "ok"
 
     # [10] Service Windows natif

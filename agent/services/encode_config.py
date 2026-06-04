@@ -67,7 +67,8 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
         "entry_list_url": server.get('EntryListUrl', ''),
         "entry_list_path": server.get('EntryListPath', ''),
         "results_post_url": server.get('ResultsPostUrl', ''),
-        "results_path": server['ResultsPath']
+        "results_path": server['ResultsPath'],
+        "tuning_type": server.get('SelectedTuningTypeValue', 'TuningDenied'),
     }
 
     game_config = {}
