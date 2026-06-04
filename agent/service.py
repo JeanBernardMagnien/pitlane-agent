@@ -9,10 +9,6 @@ import servicemanager
 import win32event
 import win32service
 import win32serviceutil
-from waitress.server import create_server
-
-from app import app
-from core import config_store
 
 
 class PitLaneAgentService(win32serviceutil.ServiceFramework):
@@ -34,6 +30,10 @@ class PitLaneAgentService(win32serviceutil.ServiceFramework):
             self.server.close()
 
     def SvcDoRun(self):
+        from waitress.server import create_server
+        from app import app
+        from core import config_store
+
         self._configure_logging()
         servicemanager.LogInfoMsg("PitLane Agent service started")
         logging.info("Service started")
