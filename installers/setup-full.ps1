@@ -160,7 +160,8 @@ function Install-AgentService {
     Add-Log "Installation service Windows PitLaneAgent"
     Push-Location $AgentPath
     try {
-        Invoke-LoggedPython -Arguments @($serviceScript, "install", "--startup", "auto")
+        Invoke-LoggedPython -Arguments @($serviceScript, "install")
+        sc.exe config PitLaneAgent start= auto | Out-Null
         Invoke-LoggedPython -Arguments @($serviceScript, "start")
     } finally {
         Pop-Location
