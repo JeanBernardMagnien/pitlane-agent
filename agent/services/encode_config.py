@@ -51,25 +51,31 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
     sessions = cfg['Sessions']
 
     server_config = {
-        "server_tcp_listener_port": server['TcpPort'],
-        "server_udp_listener_port": server['UdpPort'],
-        "server_tcp_internal_port": server['TcpPort'],
-        "server_udp_internal_port": server['UdpPort'],
-        "server_http_port": server['HttpPort'],
-        "server_name": server['ServerName'],
-        "max_players": server['MaxPlayers'],
-        "cycle": server['IsCycleEnabled'],
-        "allowed_cars_list_full": cars,
-        "driver_password": server['DriverPassword'],
-        "spectator_password": server['SpectatorPassword'],
-        "admin_password": server['AdminPassword'],
-        "type": server['SelectedServerTypeValue'],
-        "entry_list_url": server.get('EntryListUrl', ''),
-        "entry_list_path": server.get('EntryListPath', ''),
-        "results_post_url": server.get('ResultsPostUrl', ''),
-        "results_path": server['ResultsPath'],
-        "tuning_type": server.get('SelectedTuningTypeValue', 'TuningDenied'),
+        'server_tcp_listener_port': server['TcpPort'],
+        'server_udp_listener_port': server['UdpPort'],
+        'server_tcp_internal_port': server['TcpPort'],
+        'server_udp_internal_port': server['UdpPort'],
+        'server_http_port': server['HttpPort'],
+        'server_name': server['ServerName'],
+        'max_players': server['MaxPlayers'],
+        'cycle': server['IsCycleEnabled'],
+        'allowed_cars_list_full': cars,
+        'driver_password': server['DriverPassword'],
+        'spectator_password': server['SpectatorPassword'],
+        'admin_password': server['AdminPassword'],
+        'type': server['SelectedServerTypeValue'],
+        'tuning_type': server.get('SelectedTuningTypeValue', 'TuningDenied'),
     }
+
+    optional_server_fields = {
+        'entry_list_server_url': server.get('EntryListUrl', ''),
+        'entry_list_path': server.get('EntryListPath', ''),
+        'results_post_url': server.get('ResultsPostUrl', ''),
+        'results_path': server.get('ResultsPath', ''),
+    }
+    for key, value in optional_server_fields.items():
+        if value:
+            server_config[key] = value
 
     game_config = {}
     waiting_session = None
