@@ -96,29 +96,16 @@ function Find-SteamCmd {
 }
 
 function Get-AppManifestPath {
-    param(
-        [string]$AcEvoPath,
-        [string]$SteamCmdExePath
-    )
+    param([string]$AcEvoPath)
 
-    if (-not [string]::IsNullOrWhiteSpace($AcEvoPath)) {
-        $normalized = $AcEvoPath -replace '/', '\'
-
-        if ($normalized -match '\\steamapps\\common\\') {
-            $steamapps = $normalized -replace '\\common\\.*$', ''
-            return (Join-Path $steamapps "appmanifest_4564210.acf")
-        }
+    if ([string]::IsNullOrWhiteSpace($AcEvoPath)) {
+        throw "Impossible de deduire appmanifest_path : AcEvoPath est vide"
     }
 
-    if (-not [string]::IsNullOrWhiteSpace($SteamCmdExePath)) {
-        $steamCmdDir = Split-Path $SteamCmdExePath
-
-        if (-not [string]::IsNullOrWhiteSpace($steamCmdDir)) {
-            return (Join-Path $steamCmdDir "steamapps\appmanifest_4564210.acf")
-        }
-    }
-
-    throw "Impossible de deduire appmanifest_path depuis AcEvoPath='$AcEvoPath' et SteamCmdExePath='$SteamCmdExePath'"
+    # L'agent met a jour via "+force_install_dir <AcEvoPath>", qui cree son propre
+    # sous-dossier steamapps dans AcEvoPath. Le manifest a surveiller est donc toujours ici,
+    # pas dans la bibliotheque SteamCMD principale.
+    return Join-Path $AcEvoPath "steamapps\appmanifest_4564210.acf"
 }
 
 function Download-Agent {
@@ -303,7 +290,7 @@ $form.Controls.Add($stepsPanel)
 $steps = @(
     "[1] Detection AC EVO",
     "[2] Detection Steam / steamcmd",
-    "[3] Deduction appmanifest",
+    "[3] Synchronisation appmanifest",
     "[4] Telechargement agent",
     "[5] Verification Python",
     "[6] Installation dependances",
@@ -442,21 +429,123 @@ $form.Add_Shown({
 
     Set-StepStatus 1 "ok"
 
-    # [3] Deduction appmanifest
+    # [3] Synchronisation appmanifest
     Set-StepStatus 2 "running"
 
-    try {
-        $AppManifestPath = Get-AppManifestPath -AcEvoPath $AcEvoPath -SteamCmdExePath $SteamCmdExe
-        Add-Log "appmanifest : $AppManifestPath"
-        Set-StepStatus 2 "ok"
-    } catch {
-        Set-StepStatus 2 "error"
-        [System.Windows.Forms.MessageBox]::Show(
-            "$_",
-            "Erreur appmanifest", "OK", "Error"
-        )
-        return
+    $AppManifestPath = Get-AppManifestPath -AcEvoPath $AcEvoPath
+
+    if ($SteamCmdExe -and (Test-Path $SteamCmdExe)) {
+        Add-Log "Synchronisation du manifest Steam (necessaire avant la 1ere mise a jour via le hub)"
+
+        $credForm = New-Object System.Windows.Forms.Form
+        $credForm.Text = "Credentials Steam"
+        $credForm.Size = New-Object System.Drawing.Size(400, 220)
+        $credForm.StartPosition = "CenterScreen"
+        $credForm.BackColor = [System.Drawing.Color]::FromArgb(22, 27, 34)
+        $credForm.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+        $credForm.Font = New-Object System.Drawing.Font("Segoe UI", 9)
+        $credForm.FormBorderStyle = "FixedDialog"
+        $credForm.MaximizeBox = $false
+
+        $noteLbl = New-Object System.Windows.Forms.Label
+        $noteLbl.Text = "Requis pour synchroniser le manifest de version AC EVO. Annuler pour ignorer (sera fait au 1er update via le hub)."
+        $noteLbl.Location = New-Object System.Drawing.Point(12, 12)
+        $noteLbl.Size = New-Object System.Drawing.Size(365, 40)
+        $noteLbl.ForeColor = [System.Drawing.Color]::FromArgb(240, 165, 0)
+        $credForm.Controls.Add($noteLbl)
+
+        $userLbl = New-Object System.Windows.Forms.Label
+        $userLbl.Text = "Nom d'utilisateur Steam :"
+        $userLbl.Location = New-Object System.Drawing.Point(12, 62)
+        $userLbl.Size = New-Object System.Drawing.Size(170, 20)
+        $credForm.Controls.Add($userLbl)
+
+        $userTxt = New-Object System.Windows.Forms.TextBox
+        $userTxt.Location = New-Object System.Drawing.Point(185, 60)
+        $userTxt.Size = New-Object System.Drawing.Size(185, 22)
+        $userTxt.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
+        $userTxt.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+        $userTxt.BorderStyle = "FixedSingle"
+        $credForm.Controls.Add($userTxt)
+
+        $passLbl = New-Object System.Windows.Forms.Label
+        $passLbl.Text = "Mot de passe Steam :"
+        $passLbl.Location = New-Object System.Drawing.Point(12, 100)
+        $passLbl.Size = New-Object System.Drawing.Size(170, 20)
+        $credForm.Controls.Add($passLbl)
+
+        $passTxt = New-Object System.Windows.Forms.TextBox
+        $passTxt.Location = New-Object System.Drawing.Point(185, 98)
+        $passTxt.Size = New-Object System.Drawing.Size(185, 22)
+        $passTxt.BackColor = [System.Drawing.Color]::FromArgb(13, 17, 23)
+        $passTxt.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+        $passTxt.BorderStyle = "FixedSingle"
+        $passTxt.PasswordChar = '*'
+        $credForm.Controls.Add($passTxt)
+
+        $okBtn = New-Object System.Windows.Forms.Button
+        $okBtn.Text = "Synchroniser"
+        $okBtn.DialogResult = "OK"
+        $okBtn.Location = New-Object System.Drawing.Point(255, 148)
+        $okBtn.Size = New-Object System.Drawing.Size(115, 28)
+        $okBtn.BackColor = [System.Drawing.Color]::FromArgb(0, 255, 136)
+        $okBtn.ForeColor = [System.Drawing.Color]::Black
+        $okBtn.FlatStyle = "Flat"
+        $credForm.Controls.Add($okBtn)
+        $credForm.AcceptButton = $okBtn
+
+        $cancelBtn = New-Object System.Windows.Forms.Button
+        $cancelBtn.Text = "Ignorer"
+        $cancelBtn.DialogResult = "Cancel"
+        $cancelBtn.Location = New-Object System.Drawing.Point(140, 148)
+        $cancelBtn.Size = New-Object System.Drawing.Size(105, 28)
+        $cancelBtn.BackColor = [System.Drawing.Color]::FromArgb(48, 54, 61)
+        $cancelBtn.ForeColor = [System.Drawing.Color]::FromArgb(230, 237, 243)
+        $cancelBtn.FlatStyle = "Flat"
+        $credForm.Controls.Add($cancelBtn)
+
+        if ($credForm.ShowDialog() -ne "OK") {
+            Add-Log "Synchronisation ignoree - le manifest sera cree au 1er update lance depuis le hub"
+        } else {
+            $steamUser = $userTxt.Text
+            $steamPass = $passTxt.Text
+            $passTxt.Text = ""
+
+            Add-Log "Lancement steamcmd +force_install_dir `"$AcEvoPath`" +app_update 4564210 validate"
+            Add-Log "Une fenetre SteamCMD va s'ouvrir - validez le Steam Guard sur votre telephone si demande."
+
+            $steamArgs = "+force_install_dir `"$AcEvoPath`" +login `"$steamUser`" `"$steamPass`" +app_update 4564210 validate +quit"
+            $steamUser = $null
+            $steamPass = $null
+
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName        = $SteamCmdExe
+            $psi.Arguments       = $steamArgs
+            $psi.UseShellExecute = $true
+            $psi.CreateNoWindow  = $false
+
+            $proc = New-Object System.Diagnostics.Process
+            $proc.StartInfo = $psi
+            [void]$proc.Start()
+
+            while (-not $proc.HasExited) {
+                [System.Windows.Forms.Application]::DoEvents()
+                Start-Sleep -Milliseconds 500
+            }
+            $proc.WaitForExit()
+
+            if (Test-Path $AppManifestPath) {
+                Add-Log "Manifest synchronise : $AppManifestPath"
+            } else {
+                Add-Log "ATTENTION : manifest toujours introuvable (code retour steamcmd $($proc.ExitCode)). Sera cree au 1er update lance depuis le hub."
+            }
+        }
+    } else {
+        Add-Log "steamcmd indisponible, synchronisation ignoree - le manifest sera cree au 1er update lance depuis le hub"
     }
+
+    Add-Log "appmanifest_path : $AppManifestPath"
+    Set-StepStatus 2 "ok"
 
     # [4] Telechargement agent
     Set-StepStatus 3 "running"

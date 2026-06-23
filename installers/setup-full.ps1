@@ -484,10 +484,16 @@ $form.Add_Shown({
 
     # [5] Telechargement AC EVO via steamcmd
     Set-StepStatus 4 "running"
-    Add-Log "Lancement steamcmd +app_update 4564210 validate"
+
+    # Chemin decide a l'avance et force via +force_install_dir : c'est le meme
+    # mecanisme que les mises a jour ulterieures de l'agent, donc le sous-dossier
+    # steamapps (et son appmanifest) existe deja a la fin de cette etape.
+    $AcEvoPath = Join-Path $SteamCmdDir "steamapps\common\Assetto Corsa EVO Dedicated Server"
+
+    Add-Log "Lancement steamcmd +force_install_dir `"$AcEvoPath`" +app_update 4564210 validate"
     Add-Log "Une fenetre SteamCMD va s'ouvrir - validez le Steam Guard sur votre telephone si demande, puis attendez la fin du telechargement."
 
-    $steamArgs = "+login `"$steamUser`" `"$steamPass`" +app_update 4564210 validate +quit"
+    $steamArgs = "+force_install_dir `"$AcEvoPath`" +login `"$steamUser`" `"$steamPass`" +app_update 4564210 validate +quit"
     $steamUser = $null
     $steamPass = $null
 
@@ -509,16 +515,7 @@ $form.Add_Shown({
 
     $proc.WaitForExit()
 
-    # Chercher d'abord dans SteamCMD (cas nominal)
-    $AcEvoPath = Find-AcEvoServer -SearchRoot $SteamCmdDir
-
-    # Si pas trouvé, fallback recherche globale (cas Steam client ou install ailleurs)
-    if (-not $AcEvoPath) {
-        Add-Log "AC EVO non trouve dans SteamCMD, recherche globale..."
-        $AcEvoPath = Find-AcEvoServer -SearchRoot $null
-    }
-
-    if (-not $AcEvoPath) {
+    if (-not (Test-Path (Join-Path $AcEvoPath "AssettoCorsaEVOServer.exe"))) {
         Set-StepStatus 4 "error"
         [System.Windows.Forms.MessageBox]::Show(
             "SteamCMD a echoue (code $($proc.ExitCode)). Verifie les credentials Steam ou Steam Guard.",
@@ -528,7 +525,7 @@ $form.Add_Shown({
     }
 
     $AgentPath = Join-Path $AcEvoPath "pitlane-agent"
-    Add-Log "Dossier AC EVO resolu : $AcEvoPath"
+    Add-Log "Dossier AC EVO : $AcEvoPath"
     Set-StepStatus 4 "ok"
 
     # [6] Installation agent
