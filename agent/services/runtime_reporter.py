@@ -255,7 +255,7 @@ def _running_instance_reports() -> list[dict]:
                 ps_proc = cached.get('process') if cached else psutil.Process(pid)
 
                 cpu_percent = _process_cpu_percent(pid, ps_proc)
-                ram_mb = round(ps_proc.memory_info().rss / 1024 / 1024, 1)
+                ram_mb = round(ps_proc.memory_info().private / 1024 / 1024, 1)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 _process_cpu_cache.pop(pid, None)
                 status = 'stopped'

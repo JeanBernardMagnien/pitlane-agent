@@ -178,7 +178,7 @@ def get_instance_status(instance_cfg: dict) -> dict:
 
     try:
         ps_proc = psutil.Process(pid)
-        ram_mb = round(ps_proc.memory_info().wset / 1024 / 1024, 1)
+        ram_mb = round(ps_proc.memory_info().private / 1024 / 1024, 1)
     except psutil.NoSuchProcess:
         ram_mb = None
 
