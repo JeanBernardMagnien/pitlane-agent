@@ -42,6 +42,69 @@ function Get-AppManifestPath {
     return Join-Path $SteamCmdDir "steamapps\appmanifest_4564210.acf"
 }
 
+function Get-RealPython {
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $cmd) { return $null }
+    if ($cmd.Source -like "*\WindowsApps\python.exe") { return $null }
+
+    try {
+        & python --version *> $null
+        if ($LASTEXITCODE -ne 0) { return $null }
+    } catch {
+        return $null
+    }
+
+    return $cmd
+}
+
+function Find-PythonExe {
+    $searchRoots = @(
+        (Join-Path $env:LOCALAPPDATA "Programs\Python"),
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)}
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($root in $searchRoots) {
+        $found = Get-ChildItem -Path $root -Filter "python.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue |
+            Where-Object { $_.DirectoryName -match "Python3" } |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    return $null
+}
+
+function Install-PythonFromOfficial {
+    $pyVersion = "3.12.7"
+    $installerUrl = "https://www.python.org/ftp/python/$pyVersion/python-$pyVersion-amd64.exe"
+    $installerPath = "$env:TEMP\python-$pyVersion-amd64.exe"
+
+    Add-Log "Telechargement de Python $pyVersion depuis python.org"
+    Invoke-WebRequest -Uri $installerUrl -OutFile $installerPath -UseBasicParsing
+
+    Add-Log "Installation silencieuse de Python $pyVersion (pour tous les utilisateurs, ajout au PATH)"
+    $proc = Start-Process -FilePath $installerPath `
+        -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0" `
+        -Wait -PassThru
+    Remove-Item $installerPath -Force -ErrorAction SilentlyContinue
+
+    Add-Log "Installateur python.org termine (code retour $($proc.ExitCode))"
+}
+
+function Wait-ForPython {
+    param([scriptblock]$RefreshPath, [int]$MaxRetries = 10)
+
+    & $RefreshPath
+    $found = Get-RealPython
+    $retries = 0
+    while (-not $found -and $retries -lt $MaxRetries) {
+        Start-Sleep -Seconds 2
+        & $RefreshPath
+        $found = Get-RealPython
+        $retries++
+    }
+    return $found
+}
+
 function Find-SteamCmd {
     Add-Log "Recherche steamcmd.exe dans les chemins connus..."
 
@@ -543,17 +606,59 @@ $form.Add_Shown({
 
     # [7] Verification Python
     Set-StepStatus 6 "running"
-    $python = Get-Command python -ErrorAction SilentlyContinue
+    $python = Get-RealPython
 
-    if (-not $python) {
-        Add-Log "Python absent - installation via winget"
-        winget install Python.Python.3 --silent --accept-package-agreements --accept-source-agreements | Out-Null
+    $refreshPath = {
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
             [System.Environment]::GetEnvironmentVariable("Path", "User")
-    } else {
-        Add-Log "Python trouve : $($python.Source)"
     }
 
+    if (-not $python) {
+        Add-Log "Python absent (ou alias Microsoft Store detecte)"
+
+        $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+        if ($wingetCmd) {
+            Add-Log "Tentative d'installation via winget"
+            $wingetOutput = & winget install Python.Python.3 --silent --accept-package-agreements --accept-source-agreements 2>&1 | Out-String
+            Add-Log "winget install Python.Python.3 (code retour $LASTEXITCODE) :"
+            Add-Log $wingetOutput.Trim()
+            $python = Wait-ForPython -RefreshPath $refreshPath
+        } else {
+            Add-Log "winget introuvable sur ce systeme (courant sur Windows Server, App Installer n'est pas preinstalle)"
+        }
+
+        if (-not $python) {
+            Add-Log "Tentative d'installation via l'installateur officiel python.org"
+            try {
+                Install-PythonFromOfficial
+                $python = Wait-ForPython -RefreshPath $refreshPath -MaxRetries 5
+            } catch {
+                Add-Log "Echec installateur python.org : $_"
+            }
+        }
+
+        if (-not $python) {
+            Add-Log "Toujours introuvable via PATH - recherche directe de python.exe sur le disque"
+            $pythonExe = Find-PythonExe
+            if ($pythonExe) {
+                $pythonDir = Split-Path $pythonExe
+                Add-Log "python.exe trouve : $pythonExe - ajout temporaire au PATH de cette session"
+                $env:Path = "$pythonDir;$env:Path"
+                $python = Get-RealPython
+            }
+        }
+
+        if (-not $python) {
+            Set-StepStatus 6 "error"
+            [System.Windows.Forms.MessageBox]::Show(
+                "Python introuvable et les installations automatiques (winget puis python.org) ont echoue (voir le detail dans le log). " +
+                "Installe Python manuellement depuis https://www.python.org/downloads/ (coche 'Add python.exe to PATH' pendant l'installation), puis relance l'installeur.",
+                "Erreur", "OK", "Error")
+            return
+        }
+    }
+
+    Add-Log "Python trouve : $($python.Source)"
     Set-StepStatus 6 "ok"
 
     # [8] Installation dependances
