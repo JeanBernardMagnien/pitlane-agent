@@ -1,3 +1,4 @@
+import logging
 import threading
 
 from flask import Flask, jsonify
@@ -19,9 +20,9 @@ def _watch_config():
         threading.Event().wait(1)
         try:
             if config_store.reload_if_changed():
-                print('[config] Rechargé')
+                logging.info('[config] Rechargé')
         except Exception as e:
-            print(f"[config] Erreur rechargement : {e}")
+            logging.error('[config] Erreur rechargement : %s', e)
 
 
 def create_app():
@@ -45,7 +46,7 @@ _watcher.start()
 
 restored_instances = restore_runtime_state(config_store.LOGGING_CFG)
 if restored_instances:
-    print(f'[runtime-state] {restored_instances} instance(s) restaurée(s)')
+    logging.info('[runtime-state] %d instance(s) restaurée(s)', restored_instances)
 
 app = create_app()
 start_runtime_reporter()

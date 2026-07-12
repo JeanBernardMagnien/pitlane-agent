@@ -30,11 +30,12 @@ class PitLaneAgentService(win32serviceutil.ServiceFramework):
             self.server.close()
 
     def SvcDoRun(self):
+        self._configure_logging()
+
         from waitress.server import create_server
         from app import app
         from core import config_store
 
-        self._configure_logging()
         servicemanager.LogInfoMsg("PitLane Agent service started")
         logging.info("Service started")
 

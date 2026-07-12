@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 import time
 import urllib.error
@@ -96,7 +97,7 @@ def _enabled_hub_configs() -> list[dict]:
         if not isinstance(hub_cfg, dict):
             continue
 
-        if hub_cfg.get('enabled', True) is False:
+        if hub_cfg.get('enabled') is not True:
             continue
 
         enabled_hubs.append({
@@ -336,7 +337,7 @@ def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
 
     if not url or not token:
         if required:
-            print(f'[runtime-report] Hub requis "{hub_name}" ignoré: configuration incomplète')
+            logging.warning('[runtime-report] Hub requis "%s" ignoré: configuration incomplète', hub_name)
         return False
 
     body = json.dumps(payload).encode('utf-8')
@@ -354,11 +355,11 @@ def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             ok = 200 <= resp.status < 300
             if not ok:
-                print(f'[runtime-report] Hub "{hub_name}" a répondu HTTP {resp.status}')
+                logging.warning('[runtime-report] Hub "%s" a répondu HTTP %s', hub_name, resp.status)
             return ok
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        level = 'ERROR' if required else 'WARN'
-        print(f'[runtime-report] {level} hub "{hub_name}": {exc.__class__.__name__}')
+        log_fn = logging.error if required else logging.warning
+        log_fn('[runtime-report] hub "%s": %s', hub_name, exc.__class__.__name__)
         return False
 
 
@@ -382,7 +383,7 @@ def send_runtime_report() -> bool:
             try:
                 results.append(future.result())
             except Exception as exc:
-                print(f'[runtime-report] Erreur push parallèle: {exc}')
+                logging.error('[runtime-report] Erreur push parallèle: %s', exc)
                 results.append(False)
 
     return any(results)
@@ -393,7 +394,7 @@ def _report_loop():
         try:
             send_runtime_report()
         except Exception as exc:
-            print(f'[runtime-report] Erreur: {exc}')
+            logging.error('[runtime-report] Erreur: %s', exc)
 
         _reporter_stop_event.wait(_report_interval())
 
@@ -406,10 +407,10 @@ def start_runtime_reporter():
 
     hub_configs = _http_report_hub_configs()
     if not any(_runtime_report_url(hub_cfg) and _agent_token(hub_cfg) for hub_cfg in hub_configs):
-        print('[runtime-report] Désactivé: WebSocket actif ou configuration HTTP incomplète')
+        logging.info('[runtime-report] Désactivé: WebSocket actif ou configuration HTTP incomplète')
         return
 
     _reporter_stop_event.clear()
     _reporter_thread = threading.Thread(target=_report_loop, daemon=True)
     _reporter_thread.start()
-    print(f'[runtime-report] HTTP fallback activé toutes les {_report_interval()}s vers {len(hub_configs)} hub(s)')
+    logging.info('[runtime-report] HTTP fallback activé toutes les %ss vers %d hub(s)', _report_interval(), len(hub_configs))

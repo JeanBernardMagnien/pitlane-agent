@@ -1,4 +1,5 @@
 import json
+import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -137,26 +138,51 @@ def _handle_message(ws, send_lock: threading.Lock, raw_message: str) -> None:
         _send_json(ws, send_lock, {'type': 'pong'})
 
 
-def _run_hub_client(hub_cfg: dict) -> None:
+def _find_hub_cfg(hub_name: str) -> dict | None:
+    for hub_cfg in _enabled_hub_configs():
+        if (hub_cfg.get('name') or 'hub') == hub_name:
+            return hub_cfg
+    return None
+
+
+def _run_hub_client(hub_name: str) -> None:
     try:
         import websocket
     except ImportError:
-        print('[hub-ws] Désactivé: dépendance websocket-client manquante')
+        logging.warning('[hub-ws] Désactivé: dépendance websocket-client manquante')
         return
 
-    hub_name = hub_cfg.get('name') or 'hub'
-    ws_url = _hub_ws_url(hub_cfg)
-    token = _agent_token(hub_cfg)
-    interval = _coerce_report_interval(hub_cfg.get('runtime_report_interval'))
-    scan_interval = _coerce_scan_interval(hub_cfg.get('runtime_scan_interval'))
     send_lock = threading.Lock()
     backoff_seconds = 1
-
-    if not ws_url or not token:
-        print(f'[hub-ws] Hub "{hub_name}" ignoré: configuration WebSocket incomplète')
-        return
+    last_ws_url = None
+    was_waiting = False
 
     while not _stop_event.is_set():
+        hub_cfg = _find_hub_cfg(hub_name)
+        ws_url = _hub_ws_url(hub_cfg) if hub_cfg else None
+        token = _agent_token(hub_cfg) if hub_cfg else None
+
+        if hub_cfg is None or not ws_url or not token:
+            if not was_waiting:
+                if hub_cfg is None:
+                    logging.info('[hub-ws] Hub "%s" désactivé/retiré de la config, en attente', hub_name)
+                else:
+                    logging.warning('[hub-ws] Hub "%s" ignoré: configuration WebSocket incomplète', hub_name)
+                was_waiting = True
+            _stop_event.wait(5)
+            continue
+
+        if was_waiting:
+            logging.info('[hub-ws] Hub "%s" de nouveau disponible', hub_name)
+            was_waiting = False
+
+        interval = _coerce_report_interval(hub_cfg.get('runtime_report_interval'))
+        scan_interval = _coerce_scan_interval(hub_cfg.get('runtime_scan_interval'))
+
+        if ws_url != last_ws_url:
+            logging.info('[hub-ws] Hub "%s": cible %s', hub_name, ws_url)
+            last_ws_url = ws_url
+
         ws = None
         try:
             ws = websocket.create_connection(ws_url, timeout=10)
@@ -164,14 +190,25 @@ def _run_hub_client(hub_cfg: dict) -> None:
 
             _send_json(ws, send_lock, {'type': 'hello', 'token': token})
             last_signature = _send_runtime_report(ws, send_lock)
-            print(f'[hub-ws] Connecté à "{hub_name}"')
+            logging.info('[hub-ws] Connecté à "%s"', hub_name)
 
             backoff_seconds = 1
             next_scan_at = time.monotonic() + scan_interval
             next_report_at = time.monotonic() + interval
+            next_config_check_at = time.monotonic() + 5
 
             while not _stop_event.is_set():
                 now = time.monotonic()
+
+                if now >= next_config_check_at:
+                    next_config_check_at = now + 5
+                    fresh_cfg = _find_hub_cfg(hub_name)
+                    fresh_ws_url = _hub_ws_url(fresh_cfg) if fresh_cfg else None
+                    fresh_token = _agent_token(fresh_cfg) if fresh_cfg else None
+                    if fresh_cfg is None or fresh_ws_url != ws_url or fresh_token != token:
+                        logging.info('[hub-ws] Config changée pour "%s", reconnexion', hub_name)
+                        break
+
                 if now >= next_scan_at or now >= next_report_at:
                     payload = _build_runtime_report()
                     signature = runtime_report_signature(payload)
@@ -194,7 +231,7 @@ def _run_hub_client(hub_cfg: dict) -> None:
                 _handle_message(ws, send_lock, raw_message)
 
         except Exception as exc:
-            print(f'[hub-ws] Déconnecté de "{hub_name}": {exc.__class__.__name__}')
+            logging.warning('[hub-ws] Déconnecté de "%s" (%s): %s', hub_name, ws_url, exc)
             _stop_event.wait(backoff_seconds)
             backoff_seconds = min(backoff_seconds * 2, 30)
         finally:
@@ -206,17 +243,17 @@ def _run_hub_client(hub_cfg: dict) -> None:
 
 
 
-def _supervise_hub_client(hub_cfg: dict) -> None:
-    hub_name = hub_cfg.get('name') or 'hub'
-
+def _supervise_hub_client(hub_name: str) -> None:
+    # _run_hub_client ne revient normalement que lorsque _stop_event est déclenché
+    # (arrêt global) ; il gère lui-même la désactivation/réactivation du hub en interne.
     while not _stop_event.is_set():
         try:
-            _run_hub_client(hub_cfg)
+            _run_hub_client(hub_name)
         except Exception as exc:
-            print(f'[hub-ws] Crash client "{hub_name}": {exc.__class__.__name__}')
+            logging.error('[hub-ws] Crash client "%s": %s', hub_name, exc.__class__.__name__)
 
         if not _stop_event.is_set():
-            print(f'[hub-ws] Redémarrage client "{hub_name}" dans 5s')
+            logging.info('[hub-ws] Redémarrage client "%s" dans 5s', hub_name)
             _stop_event.wait(5)
 
 
@@ -234,18 +271,19 @@ def start_hub_ws_clients() -> None:
     ]
 
     if not hub_configs:
-        print('[hub-ws] Désactivé: aucune configuration WebSocket')
+        logging.info('[hub-ws] Désactivé: aucune configuration WebSocket')
         return
 
     _stop_event.clear()
 
     for hub_cfg in hub_configs:
+        hub_name = hub_cfg.get('name') or 'hub'
         thread = threading.Thread(
             target=_supervise_hub_client,
-            args=(hub_cfg,),
+            args=(hub_name,),
             daemon=True,
         )
         thread.start()
         _client_threads.append(thread)
 
-    print(f'[hub-ws] Activé vers {len(hub_configs)} hub(s)')
+    logging.info('[hub-ws] Activé vers %d hub(s)', len(hub_configs))
