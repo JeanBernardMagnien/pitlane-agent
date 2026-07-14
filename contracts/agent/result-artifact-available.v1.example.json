@@ -1,0 +1,13 @@
+{
+  "type": "result_artifact_available",
+  "schema_version": 1,
+  "artifact_id": "123e4567-e89b-12d3-a456-426614174000",
+  "instance_id": "instance-contract-test",
+  "launch_id": 123,
+  "result_correlation_id": "0123456789abcdef0123456789abcdef",
+  "filename": "result-race.json",
+  "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "size": 12345,
+  "created_at": "2026-07-14T10:00:00Z",
+  "session_type_hint": "RACE"
+}

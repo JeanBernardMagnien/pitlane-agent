@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pitlane-evo.fr/contracts/agent/result-artifact-available.v1.schema.json",
+  "title": "PitLane agent result artifact notification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "type",
+    "schema_version",
+    "artifact_id",
+    "instance_id",
+    "launch_id",
+    "result_correlation_id",
+    "filename",
+    "sha256",
+    "size",
+    "created_at"
+  ],
+  "properties": {
+    "type": {
+      "const": "result_artifact_available"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "instance_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "launch_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "result_correlation_id": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{32}$"
+    },
+    "filename": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^/\\\\]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "size": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "session_type_hint": {
+      "type": "string",
+      "enum": [
+        "PRACTICE",
+        "QUALIFYING",
+        "WARMUP",
+        "RACE"
+      ]
+    }
+  }
+}
