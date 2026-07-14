@@ -86,9 +86,6 @@ def encode_payload(cfg: dict) -> tuple[str, str]:
     )
 
     for source_key, session in ordered_sessions:
-        if not session.get('IsVisible', True):
-            continue
-
         _apply_session(game_config, source_key, session)
         if source_key in ('RaceSession', 'PracticeSession'):
             waiting_session = session
