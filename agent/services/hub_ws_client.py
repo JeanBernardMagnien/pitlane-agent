@@ -121,7 +121,26 @@ def _handle_command(ws, send_lock: threading.Lock, message: dict) -> None:
     ))
 
 
-def _handle_message(ws, send_lock: threading.Lock, raw_message: str) -> None:
+def _send_artifact_notifications(
+    ws,
+    send_lock: threading.Lock,
+    hub_name: str,
+    hub_base_url: str | None,
+) -> None:
+    try:
+        from services.result_pipeline import get_result_pipeline
+
+        candidates = get_result_pipeline().spool.notification_candidates(hub_name, hub_base_url)
+        for artifact in candidates[:100]:
+            _send_json(ws, send_lock, {
+                'type': 'result_artifact_available',
+                'payload': artifact,
+            })
+    except Exception as exc:
+        logging.warning('[hub-ws] Notification résultats impossible pour "%s": %s', hub_name, exc)
+
+
+def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: str) -> None:
     try:
         message = json.loads(raw_message)
     except json.JSONDecodeError:
@@ -136,6 +155,11 @@ def _handle_message(ws, send_lock: threading.Lock, raw_message: str) -> None:
         _handle_command(ws, send_lock, message)
     elif message_type == 'ping':
         _send_json(ws, send_lock, {'type': 'pong'})
+    elif message_type == 'result_artifact_available_ack':
+        artifact_id = str(message.get('artifact_id') or '').strip()
+        if artifact_id:
+            from services.result_pipeline import get_result_pipeline
+            get_result_pipeline().spool.mark_notified(artifact_id, hub_name)
 
 
 def _find_hub_cfg(hub_name: str) -> dict | None:
@@ -196,6 +220,7 @@ def _run_hub_client(hub_name: str) -> None:
             next_scan_at = time.monotonic() + scan_interval
             next_report_at = time.monotonic() + interval
             next_config_check_at = time.monotonic() + 5
+            next_artifact_notification_at = time.monotonic()
 
             while not _stop_event.is_set():
                 now = time.monotonic()
@@ -220,6 +245,10 @@ def _run_hub_client(hub_name: str) -> None:
 
                     next_scan_at = now + scan_interval
 
+                if now >= next_artifact_notification_at:
+                    _send_artifact_notifications(ws, send_lock, hub_name, hub_cfg.get('base_url'))
+                    next_artifact_notification_at = now + 2
+
                 try:
                     raw_message = ws.recv()
                 except websocket.WebSocketTimeoutException:
@@ -228,7 +257,7 @@ def _run_hub_client(hub_name: str) -> None:
                 if raw_message is None:
                     raise websocket.WebSocketConnectionClosedException()
 
-                _handle_message(ws, send_lock, raw_message)
+                _handle_message(ws, send_lock, hub_name, raw_message)
 
         except Exception as exc:
             logging.warning('[hub-ws] Déconnecté de "%s" (%s): %s', hub_name, ws_url, exc)

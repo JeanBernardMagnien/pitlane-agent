@@ -125,9 +125,12 @@ def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
 
 def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
                      logging_cfg: dict, serverconfig_b64: str,
-                     seasondefinition_b64: str, filename: str | None = None) -> dict:
+                     seasondefinition_b64: str, filename: str | None = None,
+                     before_start=None) -> dict:
     """Stop + Start en conservant le filename."""
     stop_instance(instance_id, logging_cfg)
+    if before_start:
+        before_start()
     time.sleep(2)
     return start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=filename)
 

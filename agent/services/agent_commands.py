@@ -14,6 +14,7 @@ from services.runtime_config_compiler import (
     finalize_launch_config,
 )
 from services.runtime_reporter import build_runtime_report
+from services.result_pipeline import register_result_launch, resync_result_artifacts
 from services.server_manager import (
     _running,
     restart_instance,
@@ -197,25 +198,30 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     except Exception as e:
         return _error(f'Erreur préparation lancement : {e}')
 
-    if restart_if_running:
-        result = restart_instance(
-            instance_id,
-            inst,
-            config_store.GAME_CFG,
-            config_store.LOGGING_CFG,
-            serverconfig_b64,
-            seasondefinition_b64,
-            filename=f'launch-{launch_id or "manual"}',
-        )
-    else:
-        result = start_instance(
-            inst,
-            config_store.GAME_CFG,
-            config_store.LOGGING_CFG,
-            serverconfig_b64,
-            seasondefinition_b64,
-            filename=f'launch-{launch_id or "manual"}',
-        )
+    try:
+        if restart_if_running:
+            result = restart_instance(
+                instance_id,
+                inst,
+                config_store.GAME_CFG,
+                config_store.LOGGING_CFG,
+                serverconfig_b64,
+                seasondefinition_b64,
+                filename=f'launch-{launch_id or "manual"}',
+                before_start=lambda: register_result_launch(instance_id, launch_id, runtime_config),
+            )
+        else:
+            register_result_launch(instance_id, launch_id, runtime_config)
+            result = start_instance(
+                inst,
+                config_store.GAME_CFG,
+                config_store.LOGGING_CFG,
+                serverconfig_b64,
+                seasondefinition_b64,
+                filename=f'launch-{launch_id or "manual"}',
+            )
+    except Exception as e:
+        return _error(f'Erreur lancement ou collecte résultats : {e}')
 
     return result, 409 if 'error' in result else 200
 
@@ -303,6 +309,18 @@ def get_instance_logs_command(instance_id: str, body: dict | None = None) -> tup
     return {'lines': lines[-max_lines:]}, 200
 
 
+def resync_results_command(instance_id: str, body: dict | None = None) -> tuple[dict, int]:
+    body = body or {}
+    launch_id = body.get('launch_id')
+    result_correlation_id = str(body.get('result_correlation_id') or '').strip() or None
+    try:
+        normalized_launch_id = int(launch_id) if launch_id not in (None, '') else None
+    except (TypeError, ValueError):
+        return _error('launch_id invalide')
+
+    return resync_result_artifacts(instance_id, normalized_launch_id, result_correlation_id), 200
+
+
 COMMANDS = {
     'prepare_instance': prepare_instance_command,
     'prepare': prepare_instance_command,
@@ -323,6 +341,8 @@ COMMANDS = {
     'instance_logs': get_instance_logs_command,
     'get_logs': get_instance_logs_command,
     'logs': get_instance_logs_command,
+    'resync_result_artifacts': resync_results_command,
+    'resync_results': resync_results_command,
 }
 
 

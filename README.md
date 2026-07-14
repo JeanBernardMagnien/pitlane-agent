@@ -140,6 +140,9 @@ game:
   executable_name: AssettoCorsaEVOServer.exe
   configs_path: C:\ACEVOServer\configs
   results_path: C:\ACEVOServer\results
+  result_scan_interval: 1.0
+  result_stable_scans: 2
+  result_upload_timeout: 10.0
 
 steam:
   steamcmd_path: C:\SteamCMD\steamcmd.exe
@@ -165,6 +168,7 @@ auth:
 
 logging:
   logs_path: C:\ACEVOServer\logs
+  # results_spool_path: C:\ACEVOServer\logs\result-spool
   max_lines: 500
 ```
 
@@ -228,6 +232,7 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 |---|---|
 | `hello` | Connexion initiale |
 | `runtime_report` | Chaque tick (`runtime_report_interval`) + après chaque commande |
+| `result_artifact_available` | Un fichier résultat stable est présent dans le spool pour ce hub |
 
 ### Commandes reçues par l'agent
 
@@ -241,12 +246,29 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 | `stop_instance` | Arrête le processus |
 | `restart_instance` | Redémarre avec une config runtime fournie |
 | `get_instance_logs` | Retourne les dernières lignes de log |
+| `resync_result_artifacts` | Rescanne les fichiers d'une tentative et remet ses artefacts en file |
 | `steam_update_check` | Compare le build local et le build distant |
 | `steam_update` | Lance la mise à jour via SteamCMD |
 | `steam_update_logs` | Retourne les logs SteamCMD |
 | `runtime_report` | Retourne immédiatement un rapport runtime |
 
 L'agent répond à chaque commande avec un message `command_result` portant le même `id`.
+
+### Pipeline de résultats
+
+À chaque lancement corrélé, l'agent crée un manifeste local puis scanne le
+`ResultsPath` isolé de l'instance. Un fichier doit être inchangé pendant deux
+scans et contenir un objet JSON valide avant d'être copié atomiquement dans le
+spool. La copie porte une identité déterministe et un SHA-256, puis est envoyée
+par HTTP vers le `ResultsPostUrl` signé fourni par le hub. En cas d'échec, le
+spool reste sur disque et l'upload reprend avec un délai exponentiel, y compris
+après redémarrage de l'agent.
+
+Le scan périodique est volontairement la seule source de découverte en V1 : il
+n'ajoute aucune dépendance Windows et ne peut pas perdre une notification
+filesystem. Avec plusieurs hubs configurés, le signal WebSocket est envoyé
+uniquement au hub dont l'origine correspond au `ResultsPostUrl`; l'URL signée
+elle-même n'est jamais incluse dans la notification ou l'inventaire.
 
 Le push HTTP `runtime_report_endpoint` n'est utilisé que si `websocket_enabled: false` est explicitement configuré sur un hub (fallback).
 
@@ -286,6 +308,7 @@ Le hub fournit l'instance complète dans le payload.
 | POST | `/api/instances/{id}/start` | Démarre avec la dernière config runtime en mémoire |
 | POST | `/api/instances/{id}/stop` | Arrête l'instance |
 | POST | `/api/instances/{id}/restart` | Redémarre avec une config runtime fournie |
+| POST | `/api/instances/{id}/results/resync` | Rescanne et remet en file les résultats de la tentative demandée |
 | GET | `/api/instances/{id}/logs` | Dernières lignes de log |
 | WS | `/api/instances/{id}/logs/stream` | Streaming live des logs |
 
@@ -313,6 +336,7 @@ Le hub fournit l'instance complète dans le payload.
 ```text
 logs/
 ├── log_<instance_id>_YYYY-MM-DD_HH-MM-SS.log   # log par instance
+├── result-spool/                                # manifests et copies résultat persistantes
 └── steam_update.log                              # log SteamCMD
 ```
 

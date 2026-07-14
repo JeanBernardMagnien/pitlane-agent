@@ -27,10 +27,16 @@ game:
   # vide/absent pour les logs par defaut.
   log_debug: ""
 
-  # Passe -write_server_results au lancement : force l'ecriture des
-  # resultats en fichiers locaux dans results_path, en plus du webhook
-  # results_post_url. Filet de securite independant du reseau, safe en prod.
+  # Passe -write_server_results au lancement. Les tests AC EVO 0.8.0 montrent
+  # que results_path et results_post_url fonctionnent aussi sans ce flag ; il
+  # reste donc optionnel et desactive par defaut.
   write_server_results: false
+
+  # Pipeline de résultats local : scan périodique sans dépendance native,
+  # validation de stabilité puis upload HTTP idempotent avec reprise.
+  result_scan_interval: 1.0
+  result_stable_scans: 2
+  result_upload_timeout: 10.0
 
 steam:
   steamcmd_path: __STEAMCMD_PATH__
@@ -71,4 +77,6 @@ auth:
 
 logging:
   logs_path: __LOGS_PATH__
+  # Par défaut : <logs_path>/result-spool. Peut être placé sur un disque dédié.
+  # results_spool_path: C:\\PitLane\\result-spool
   max_lines: 500
