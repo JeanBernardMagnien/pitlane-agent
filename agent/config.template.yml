@@ -13,6 +13,25 @@ game:
   configs_path: __CONFIGS_PATH__
   results_path: __RESULTS_PATH__
 
+  # Passe -no_lobby au lancement : le serveur ne s'enregistre pas dans le
+  # lobby public Kunos, ce qui evite le "Backend controlled shutdown" que
+  # Kunos declenche si le port UDP n'est pas joignable publiquement (LAN,
+  # dev local, serveur derriere un NAT sans port forwarding UDP correct).
+  # A laisser a false/absent pour un vrai serveur dedie public.
+  no_lobby: false
+
+  # Passe -log_debug="<valeur>" au lancement (ex: "server,network") pour des
+  # logs plus detailles cote AC EVO. Ne change pas le comportement du
+  # serveur, augmente juste la verbosite : safe a activer en prod pour
+  # deboguer (ex: results_post_url qui ne se declenche pas). Laisser
+  # vide/absent pour les logs par defaut.
+  log_debug: ""
+
+  # Passe -write_server_results au lancement : force l'ecriture des
+  # resultats en fichiers locaux dans results_path, en plus du webhook
+  # results_post_url. Filet de securite independant du reseau, safe en prod.
+  write_server_results: false
+
 steam:
   steamcmd_path: __STEAMCMD_PATH__
   app_id: 4564210

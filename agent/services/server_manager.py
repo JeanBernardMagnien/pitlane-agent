@@ -6,6 +6,8 @@ import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
 
+from services.server_process_command import build_process_args
+
 # { instance_id → { process, instance, started_at, config, config_loaded_at, log_file } }
 _running = {}
 
@@ -62,12 +64,7 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
 
     exe_path = Path(game_cfg['install_path']) / game_cfg['executable_name']
     log_file = _open_log_file(instance_id, logging_cfg['logs_path'])
-
-    args = [
-        str(exe_path),
-        '-serverconfig', serverconfig_b64,
-        '-seasondefinition', seasondefinition_b64,
-    ]
+    args = build_process_args(exe_path, game_cfg, serverconfig_b64, seasondefinition_b64)
 
     process = subprocess.Popen(
         args,
