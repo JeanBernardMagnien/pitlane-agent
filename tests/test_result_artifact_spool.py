@@ -24,6 +24,20 @@ class _Response:
 
 
 class ResultArtifactSpoolTest(unittest.TestCase):
+    def test_register_launch_ignores_result_collection_disabled_by_hub(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            results = root / 'results' / 'server3'
+            results.mkdir(parents=True)
+            runtime_config = self._runtime_config(results)
+            runtime_config['Server']['CollectResults'] = False
+            spool = ResultArtifactSpool(root / 'spool', stable_scans=2)
+
+            manifest = spool.register_launch('server3', 42, runtime_config)
+
+            self.assertIsNone(manifest)
+            self.assertEqual([], list((root / 'spool' / 'launches').glob('*.json')))
+
     def test_scan_ignores_baseline_and_enqueues_only_stable_json(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

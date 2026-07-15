@@ -39,10 +39,13 @@ class ResultArtifactSpool:
         for directory in (self.launches_dir, self.artifacts_dir, self.files_dir):
             directory.mkdir(parents=True, exist_ok=True)
 
-    def register_launch(self, instance_id: str, launch_id: int, runtime_config: dict) -> dict:
+    def register_launch(self, instance_id: str, launch_id: int, runtime_config: dict) -> dict | None:
         server = runtime_config.get('Server') if isinstance(runtime_config, dict) else None
         if not isinstance(server, dict):
             raise ValueError('runtime_config.Server requis pour suivre les résultats')
+
+        if server.get('CollectResults') is False:
+            return None
 
         correlation_id = str(server.get('ResultCorrelationId') or '').strip()
         upload_url = str(server.get('ResultsPostUrl') or '').strip()
