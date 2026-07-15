@@ -169,6 +169,8 @@ auth:
 logging:
   logs_path: C:\ACEVOServer\logs
   # results_spool_path: C:\ACEVOServer\logs\result-spool
+  results_spool_max_bytes: 1073741824
+  results_spool_minimum_free_bytes: 5368709120
   max_lines: 500
 ```
 
@@ -247,6 +249,7 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 | `restart_instance` | Redémarre avec une config runtime fournie |
 | `get_instance_logs` | Retourne les dernières lignes de log |
 | `resync_result_artifacts` | Rescanne les fichiers d'une tentative et remet ses artefacts en file |
+| `purge_result_artifacts` | Dry-run ou purge une liste explicitement autorisée de Practice/WarmUp déjà livrés |
 | `steam_update_check` | Compare le build local et le build distant |
 | `steam_update` | Lance la mise à jour via SteamCMD |
 | `steam_update_logs` | Retourne les logs SteamCMD |
@@ -263,6 +266,15 @@ spool. La copie porte une identité déterministe et un SHA-256, puis est envoy�
 par HTTP vers le `ResultsPostUrl` signé fourni par le hub. En cas d'échec, le
 spool reste sur disque et l'upload reprend avec un délai exponentiel, y compris
 après redémarrage de l'agent.
+
+Le rapport runtime expose le volume du spool, son nombre de fichiers, les
+statuts d'artefacts et l'espace disque libre. Les seuils configurés produisent
+un état `healthy`, `warning` ou `critical`, mais ne déclenchent aucune suppression
+automatique. La commande `purge_result_artifacts` reste en dry-run sans
+`execute: true` et n'accepte qu'une liste explicite d'artefacts déjà `delivered`
+de type Practice/WarmUp. Qualification, Race, pending et les artefacts non
+autorisés restent protégés ; le hub ne doit envoyer cette autorisation qu'après
+la clôture sportive sans incident.
 
 Le scan périodique est volontairement la seule source de découverte en V1 : il
 n'ajoute aucune dépendance Windows et ne peut pas perdre une notification

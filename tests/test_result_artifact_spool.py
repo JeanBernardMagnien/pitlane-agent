@@ -120,6 +120,76 @@ class ResultArtifactSpoolTest(unittest.TestCase):
             self.assertEqual(1, len(spool.notification_candidates('local', 'https://hub.test')))
             self.assertEqual(0, len(spool.notification_candidates('production', 'https://pitlane.example')))
 
+    def test_storage_usage_reports_statuses_and_thresholds(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            results = root / 'results' / 'server3'
+            results.mkdir(parents=True)
+            spool = ResultArtifactSpool(root / 'spool', stable_scans=2)
+            spool.register_launch('server3', 42, self._runtime_config(results))
+            (results / 'results_20260714_141322_race.json').write_text(
+                '{"session_type":"Race","is_completed":true}',
+                encoding='utf-8',
+            )
+            spool.scan_once()
+            artifact = spool.scan_once()[0]
+            spool.mark_delivered(artifact['artifact_id'], 200)
+
+            usage = spool.storage_usage(max_bytes=1, minimum_free_bytes=0)
+
+            self.assertEqual('critical', usage['status'])
+            self.assertIn('result_spool_limit_reached', usage['reasons'])
+            self.assertEqual(1, usage['artifacts']['delivered'])
+            self.assertGreaterEqual(usage['file_count'], 3)
+            self.assertGreater(usage['stored_bytes'], 0)
+            self.assertGreater(usage['disk_free_bytes'], 0)
+
+    def test_explicit_purge_only_removes_delivered_practice_or_warmup(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            results = root / 'results' / 'server3'
+            results.mkdir(parents=True)
+            spool = ResultArtifactSpool(root / 'spool', stable_scans=2)
+            spool.register_launch('server3', 42, self._runtime_config(results))
+            (results / 'results_20260714_140545_practice.json').write_text(
+                '{"session_type":"Practice","is_completed":true}',
+                encoding='utf-8',
+            )
+            (results / 'results_20260714_141322_race.json').write_text(
+                '{"session_type":"Race","is_completed":true}',
+                encoding='utf-8',
+            )
+            spool.scan_once()
+            created = spool.scan_once()
+            by_type = {artifact['session_type_hint']: artifact for artifact in created}
+            for artifact in created:
+                spool.mark_delivered(artifact['artifact_id'], 200)
+
+            dry_run = spool.purge_delivered([
+                by_type['PRACTICE']['artifact_id'],
+                by_type['RACE']['artifact_id'],
+                'missing-artifact',
+            ], instance_id='server3')
+
+            self.assertTrue(dry_run['dry_run'])
+            self.assertEqual(1, dry_run['eligible'])
+            self.assertEqual(1, dry_run['protected'])
+            self.assertEqual(1, dry_run['not_found'])
+            self.assertTrue(spool.file_path(by_type['PRACTICE']).is_file())
+
+            executed = spool.purge_delivered(
+                [by_type['PRACTICE']['artifact_id']],
+                instance_id='server3',
+                execute=True,
+            )
+
+            self.assertEqual(1, executed['purged'])
+            self.assertFalse(spool.file_path(by_type['PRACTICE']).exists())
+            inventory = {item['session_type_hint']: item for item in spool.inventory(launch_id=42)}
+            self.assertEqual('purged', inventory['PRACTICE']['status'])
+            self.assertEqual('delivered', inventory['RACE']['status'])
+            self.assertEqual([], spool.pending())
+
     def _runtime_config(
         self,
         results_path: Path,

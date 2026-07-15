@@ -14,7 +14,11 @@ from services.runtime_config_compiler import (
     finalize_launch_config,
 )
 from services.runtime_reporter import build_runtime_report
-from services.result_pipeline import register_result_launch, resync_result_artifacts
+from services.result_pipeline import (
+    purge_delivered_result_artifacts,
+    register_result_launch,
+    resync_result_artifacts,
+)
 from services.server_manager import (
     _running,
     restart_instance,
@@ -321,6 +325,22 @@ def resync_results_command(instance_id: str, body: dict | None = None) -> tuple[
     return resync_result_artifacts(instance_id, normalized_launch_id, result_correlation_id), 200
 
 
+def purge_results_command(instance_id: str, body: dict | None = None) -> tuple[dict, int]:
+    body = body or {}
+    artifact_ids = body.get('artifact_ids')
+    if not isinstance(artifact_ids, list) or not all(isinstance(value, str) for value in artifact_ids):
+        return _error('artifact_ids doit être une liste de chaînes')
+
+    try:
+        return purge_delivered_result_artifacts(
+            artifact_ids,
+            instance_id=instance_id,
+            execute=body.get('execute') is True,
+        ), 200
+    except ValueError as exc:
+        return _error(str(exc))
+
+
 COMMANDS = {
     'prepare_instance': prepare_instance_command,
     'prepare': prepare_instance_command,
@@ -343,6 +363,7 @@ COMMANDS = {
     'logs': get_instance_logs_command,
     'resync_result_artifacts': resync_results_command,
     'resync_results': resync_results_command,
+    'purge_result_artifacts': purge_results_command,
 }
 
 

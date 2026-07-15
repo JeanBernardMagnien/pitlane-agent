@@ -286,6 +286,15 @@ def build_runtime_report() -> dict:
     cpu_cores = psutil.cpu_count(logical=False) or 1
     cpu_threads = psutil.cpu_count(logical=True) or cpu_cores
 
+    try:
+        from services.result_pipeline import result_spool_usage
+        spool_usage = result_spool_usage()
+    except Exception as exc:
+        spool_usage = {
+            'status': 'unknown',
+            'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
+        }
+
     return {
         'agent': {
             'version': '0.2.0',
@@ -297,6 +306,7 @@ def build_runtime_report() -> dict:
             'ram_total_gb': round(memory.total / 1024 / 1024 / 1024, 2),
             'ram_used_gb': round(memory.used / 1024 / 1024 / 1024, 2),
             'ram_percent': _safe_float(memory.percent),
+            'result_spool': spool_usage,
         },
         'instances': _running_instance_reports(),
     }
@@ -323,8 +333,21 @@ def runtime_report_signature(payload: dict) -> str:
 
     comparable_instances.sort(key=lambda item: item['id'])
 
+    agent = payload.get('agent') if isinstance(payload, dict) else {}
+    result_spool = agent.get('result_spool') if isinstance(agent, dict) else None
+    comparable_spool = None
+    if isinstance(result_spool, dict):
+        comparable_spool = {
+            'status': result_spool.get('status'),
+            'reasons': result_spool.get('reasons'),
+            'file_count': result_spool.get('file_count'),
+            'stored_bytes': result_spool.get('stored_bytes'),
+            'artifacts': result_spool.get('artifacts'),
+        }
+
     return json.dumps({
         'instances': comparable_instances,
+        'result_spool': comparable_spool,
     }, sort_keys=True, separators=(',', ':'))
 
 

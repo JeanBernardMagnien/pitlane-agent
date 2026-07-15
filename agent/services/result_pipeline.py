@@ -107,6 +107,27 @@ def resync_result_artifacts(
     return result
 
 
+def result_spool_usage() -> dict:
+    from core import config_store
+
+    return get_result_pipeline().spool.storage_usage(
+        max_bytes=int(config_store.LOGGING_CFG.get('results_spool_max_bytes', 1073741824)),
+        minimum_free_bytes=int(config_store.LOGGING_CFG.get('results_spool_minimum_free_bytes', 5368709120)),
+    )
+
+
+def purge_delivered_result_artifacts(
+    artifact_ids: list[str],
+    instance_id: str | None = None,
+    execute: bool = False,
+) -> dict:
+    return get_result_pipeline().spool.purge_delivered(
+        artifact_ids,
+        instance_id=instance_id,
+        execute=execute,
+    )
+
+
 def _run_loop() -> None:
     pipeline = get_result_pipeline()
     while not _stop_event.is_set():

@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -97,7 +98,7 @@ class ResultArtifactSpool:
             manifests = []
             for path in sorted(self.artifacts_dir.glob('*.json')):
                 manifest = _safe_json(path)
-                if not manifest or manifest.get('status') == 'delivered':
+                if not manifest or manifest.get('status') != 'pending':
                     continue
                 if float(manifest.get('next_attempt_at') or 0) <= now:
                     manifests.append(manifest)
@@ -188,8 +189,134 @@ class ResultArtifactSpool:
                     'artifact_id', 'instance_id', 'launch_id', 'result_correlation_id',
                     'filename', 'sha256', 'size', 'created_at', 'session_type_hint',
                     'status', 'attempts', 'last_error', 'delivered_at',
+                    'purged_at',
                 )})
             return inventory
+
+    def storage_usage(self, max_bytes: int = 0, minimum_free_bytes: int = 0) -> dict:
+        max_bytes = max(0, int(max_bytes))
+        minimum_free_bytes = max(0, int(minimum_free_bytes))
+
+        with self._lock:
+            status_counts: dict[str, int] = {}
+            for path in self.artifacts_dir.glob('*.json'):
+                manifest = _safe_json(path)
+                if not manifest:
+                    continue
+                status = str(manifest.get('status') or 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+
+            total_bytes = 0
+            file_count = 0
+            for directory in (self.launches_dir, self.artifacts_dir, self.files_dir):
+                for path in directory.glob('*'):
+                    try:
+                        if path.is_file():
+                            total_bytes += path.stat().st_size
+                            file_count += 1
+                    except OSError:
+                        continue
+
+            try:
+                disk = shutil.disk_usage(self.root)
+                disk_total_bytes = int(disk.total)
+                disk_free_bytes = int(disk.free)
+            except OSError:
+                disk_total_bytes = None
+                disk_free_bytes = None
+
+            critical_reasons = []
+            warning_reasons = []
+            if max_bytes > 0 and total_bytes >= max_bytes:
+                critical_reasons.append('result_spool_limit_reached')
+            elif max_bytes > 0 and total_bytes >= int(max_bytes * 0.8):
+                warning_reasons.append('result_spool_near_limit')
+
+            if disk_free_bytes is not None and disk_free_bytes <= minimum_free_bytes:
+                critical_reasons.append('disk_free_space_below_minimum')
+            elif disk_free_bytes is not None and disk_free_bytes <= minimum_free_bytes * 2:
+                warning_reasons.append('disk_free_space_near_minimum')
+
+            status = 'critical' if critical_reasons else ('warning' if warning_reasons else 'healthy')
+
+            return {
+                'status': status,
+                'reasons': critical_reasons + warning_reasons,
+                'file_count': file_count,
+                'stored_bytes': total_bytes,
+                'max_stored_bytes': max_bytes,
+                'stored_percent': round(total_bytes / max_bytes * 100, 2) if max_bytes > 0 else None,
+                'disk_total_bytes': disk_total_bytes,
+                'disk_free_bytes': disk_free_bytes,
+                'minimum_free_bytes': minimum_free_bytes,
+                'artifacts': status_counts,
+            }
+
+    def purge_delivered(
+        self,
+        artifact_ids: list[str],
+        instance_id: str | None = None,
+        execute: bool = False,
+    ) -> dict:
+        requested_ids = list(dict.fromkeys(str(value).strip() for value in artifact_ids if str(value).strip()))
+        if len(requested_ids) > 1000:
+            raise ValueError('maximum 1000 artefacts par purge')
+
+        summary = {
+            'dry_run': not execute,
+            'requested': len(requested_ids),
+            'eligible': 0,
+            'purged': 0,
+            'bytes': 0,
+            'missing_files': 0,
+            'protected': 0,
+            'not_found': 0,
+        }
+
+        with self._lock:
+            for artifact_id in requested_ids:
+                manifest = self._artifact(artifact_id)
+                if not manifest:
+                    summary['not_found'] += 1
+                    continue
+                if instance_id is not None and manifest.get('instance_id') != str(instance_id):
+                    summary['protected'] += 1
+                    continue
+                if manifest.get('status') != 'delivered' or manifest.get('session_type_hint') not in ('PRACTICE', 'WARMUP'):
+                    summary['protected'] += 1
+                    continue
+
+                path = self.file_path(manifest)
+                try:
+                    stored_bytes = path.stat().st_size if path.is_file() else None
+                except OSError:
+                    stored_bytes = None
+
+                summary['eligible'] += 1
+                if stored_bytes is None:
+                    summary['missing_files'] += 1
+                else:
+                    summary['bytes'] += stored_bytes
+
+                if not execute:
+                    continue
+
+                try:
+                    if path.is_file():
+                        path.unlink()
+                except OSError as exc:
+                    raise RuntimeError(f'impossible de supprimer {artifact_id}: {exc}') from exc
+
+                manifest.update({
+                    'status': 'purged',
+                    'purged_at': _utc_iso(),
+                    'last_error': None,
+                    'next_attempt_at': 0,
+                })
+                self._write_json(self._artifact_path(artifact_id), manifest)
+                summary['purged'] += 1
+
+        return summary
 
     def notification_candidates(self, hub_name: str, hub_base_url: str | None = None) -> list[dict]:
         expected_origin = self._url_origin(hub_base_url) if hub_base_url else None
@@ -198,7 +325,7 @@ class ResultArtifactSpool:
             candidates = []
             for path in sorted(self.artifacts_dir.glob('*.json')):
                 manifest = _safe_json(path)
-                if not manifest or hub_name in (manifest.get('notified_hubs') or []):
+                if not manifest or manifest.get('status') == 'purged' or hub_name in (manifest.get('notified_hubs') or []):
                     continue
                 if expected_origin and self._url_origin(manifest.get('upload_url')) != expected_origin:
                     continue

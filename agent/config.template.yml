@@ -79,4 +79,7 @@ logging:
   logs_path: __LOGS_PATH__
   # Par défaut : <logs_path>/result-spool. Peut être placé sur un disque dédié.
   # results_spool_path: C:\\PitLane\\result-spool
+  # Seuils remontés au hub ; aucune purge automatique n'est déclenchée par ces valeurs.
+  results_spool_max_bytes: 1073741824
+  results_spool_minimum_free_bytes: 5368709120
   max_lines: 500
