@@ -62,6 +62,51 @@ class RuntimeConfigCompilerTest(unittest.TestCase):
             self.assertTrue(expected_path.is_dir())
             self.assertEqual(str(expected_path) + os.sep, compiled["Server"]["ResultsPath"])
 
+    def test_isolates_collected_results_by_attempt_correlation(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            runtime_config = copy.deepcopy(self.runtime_config)
+            correlation_id = "0123456789abcdef0123456789abcdef"
+            runtime_config["Server"].update({
+                "CollectResults": True,
+                "ResultCorrelationId": correlation_id,
+            })
+
+            compiled = finalize_launch_config(
+                runtime_config,
+                self.instance,
+                {
+                    "install_path": str(root / "game"),
+                    "results_path": str(root / "results"),
+                },
+            )
+
+            expected_path = root / "results" / self.instance["id"] / correlation_id
+            self.assertTrue(expected_path.is_dir())
+            self.assertEqual(str(expected_path) + os.sep, compiled["Server"]["ResultsPath"])
+
+    def test_non_collected_launch_keeps_instance_local_results_directory(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            runtime_config = copy.deepcopy(self.runtime_config)
+            runtime_config["Server"].update({
+                "CollectResults": False,
+                "ResultCorrelationId": "0123456789abcdef0123456789abcdef",
+            })
+
+            compiled = finalize_launch_config(
+                runtime_config,
+                self.instance,
+                {
+                    "install_path": str(root / "game"),
+                    "results_path": str(root / "results"),
+                },
+            )
+
+            expected_path = root / "results" / self.instance["id"]
+            self.assertTrue(expected_path.is_dir())
+            self.assertEqual(str(expected_path) + os.sep, compiled["Server"]["ResultsPath"])
+
 
 if __name__ == "__main__":
     unittest.main()

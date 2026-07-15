@@ -260,12 +260,13 @@ L'agent répond à chaque commande avec un message `command_result` portant le m
 ### Pipeline de résultats
 
 À chaque lancement corrélé, l'agent crée un manifeste local puis scanne le
-`ResultsPath` isolé de l'instance. Un fichier doit être inchangé pendant deux
+`ResultsPath` isolé par instance et par `ResultCorrelationId`. Un fichier doit être inchangé pendant deux
 scans et contenir un objet JSON valide avant d'être copié atomiquement dans le
 spool. La copie porte une identité déterministe et un SHA-256, puis est envoyée
 par HTTP vers le `ResultsPostUrl` signé fourni par le hub. En cas d'échec, le
 spool reste sur disque et l'upload reprend avec un délai exponentiel, y compris
-après redémarrage de l'agent.
+après redémarrage de l'agent. Les Quick Sessions et lancements techniques gardent
+le répertoire local de l'instance mais ferment toute fenêtre collectée précédente.
 
 Le rapport runtime expose le volume du spool, son nombre de fichiers, les
 statuts d'artefacts et l'espace disque libre. Les seuils configurés produisent
