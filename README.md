@@ -12,7 +12,7 @@ Ouvrir PowerShell en administrateur sur le serveur Windows, puis lancer l'instal
 
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/PitLaneInstaller.exe" `
+  -Uri "https://dl.pitlane-evo.fr/latest/PitLaneInstaller.exe" `
   -OutFile "$env:USERPROFILE\Downloads\PitLaneInstaller.exe"
 
 Start-Process "$env:USERPROFILE\Downloads\PitLaneInstaller.exe" -Verb RunAs
@@ -75,6 +75,8 @@ Le workflow cree alors la release GitHub avec les assets :
 - `uninstaller.exe`
 
 On peut aussi lancer le workflow manuellement depuis GitHub Actions avec un input `tag` comme `v0.3.0`; dans ce cas la release est creee pour le commit courant.
+
+Le depot GitHub peut rester prive : une fois la release GitHub creee, le workflow pousse en plus les memes executables (+ `agent.zip` et un `version.json`) vers `https://dl.pitlane-evo.fr/latest/` sur le VPS, via SFTP. C'est cette URL que les installateurs et l'updater utilisent, pas GitHub. Voir `installers/README.md` pour le detail des secrets a configurer.
 
 ## Configuration
 

@@ -105,7 +105,7 @@ function Get-AppManifestPath {
 function Download-Agent {
     param($DestinationPath)
 
-    $url = "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/agent.zip"
+    $url = "https://dl.pitlane-evo.fr/latest/agent.zip"
     $zip = "$env:TEMP\pitlane-agent.zip"
 
     if (Test-Path $DestinationPath) {
@@ -122,7 +122,7 @@ function Download-Agent {
 function Install-AgentUpdater {
     param([string]$AgentPath)
 
-    $url = "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download/updater.exe"
+    $url = "https://dl.pitlane-evo.fr/latest/updater.exe"
     $toolsPath = Join-Path $AgentPath "tools"
     $updaterPath = Join-Path $toolsPath "PitLaneAgentUpdater.exe"
 

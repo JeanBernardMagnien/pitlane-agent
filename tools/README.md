@@ -18,23 +18,14 @@ tools/uninstaller.ps1
 
 ---
 
-## Telecharger `uninstaller.ps1`
+## Telecharger `uninstaller.exe`
 
 Ouvrir PowerShell sur le serveur Windows, puis executer :
 
-Le .exe  
-
 ```powershell
 Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.exe" `
+  -Uri "https://dl.pitlane-evo.fr/latest/uninstaller.exe" `
   -OutFile "$env:USERPROFILE\Downloads\uninstaller.exe"
-```
-ou le ps1
-
-```powershell
-Invoke-WebRequest `
-  -Uri "https://raw.githubusercontent.com/JeanBernardMagnien/pitlane-agent/main/tools/uninstaller.ps1" `
-  -OutFile "$env:USERPROFILE\Downloads\uninstaller.ps1"
 ```
 
 Le fichier sera telecharge dans :
@@ -50,7 +41,7 @@ Le fichier sera telecharge dans :
 Ouvrir PowerShell en administrateur, puis lancer :
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\uninstaller.ps1"
+Start-Process "$env:USERPROFILE\Downloads\uninstaller.exe" -Verb RunAs
 ```
 
 Le script ouvre une interface graphique avec :
@@ -61,22 +52,6 @@ Le script ouvre une interface graphique avec :
 * un bouton `Run reset`
 * un bouton `Fermer`
 * des cases a cocher pour les suppressions avancees
-
----
-
-## Debloquer le fichier si necessaire
-
-Si Windows bloque l'execution du script parce qu'il vient d'Internet :
-
-```powershell
-Unblock-File "$env:USERPROFILE\Downloads\uninstaller.ps1"
-```
-
-Puis relancer :
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\uninstaller.ps1"
-```
 
 ---
 

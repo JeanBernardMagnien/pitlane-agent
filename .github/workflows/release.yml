@@ -92,3 +92,40 @@ jobs:
             dist/setup-full.exe
             dist/updater.exe
             dist/uninstaller.exe
+
+      - name: Generate release manifest
+        if: steps.release_tag.outputs.tag != ''
+        shell: pwsh
+        run: |
+          $manifest = [ordered]@{
+            tag_name     = "${{ steps.release_tag.outputs.tag }}"
+            commit       = "${{ github.sha }}"
+            published_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          }
+
+          ($manifest | ConvertTo-Json -Depth 4) | Set-Content -Path "dist/version.json" -Encoding UTF8
+
+      - name: Deploy release assets to VPS
+        if: steps.release_tag.outputs.tag != ''
+        shell: pwsh
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          $sshDir = Join-Path $env:RUNNER_TEMP "ssh"
+          New-Item -ItemType Directory -Path $sshDir -Force | Out-Null
+
+          $keyPath = Join-Path $sshDir "deploy_key"
+          Set-Content -Path $keyPath -Value $env:DEPLOY_KEY -NoNewline -Encoding ascii
+          icacls $keyPath /inheritance:r | Out-Null
+          icacls $keyPath /grant:r "$($env:USERNAME):(R)" | Out-Null
+
+          $knownHostsPath = Join-Path $sshDir "known_hosts"
+          Set-Content -Path $knownHostsPath -Value $env:DEPLOY_KNOWN_HOSTS -Encoding ascii
+
+          $batchPath = Join-Path $sshDir "batch.txt"
+          @("cd latest", "put dist/*", "bye") | Set-Content -Path $batchPath -Encoding ascii
+
+          sftp -o UserKnownHostsFile=$knownHostsPath -o StrictHostKeyChecking=yes -i $keyPath -b $batchPath "$($env:DEPLOY_USER)@$($env:DEPLOY_HOST)"

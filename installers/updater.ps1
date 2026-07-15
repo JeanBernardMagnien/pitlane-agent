@@ -3,10 +3,9 @@
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
-$RepoOwner = "JeanBernardMagnien"
-$RepoName = "pitlane-agent"
-$ReleaseZipUrl = "https://github.com/$RepoOwner/$RepoName/releases/latest/download/agent.zip"
-$LatestReleaseApiUrl = "https://api.github.com/repos/$RepoOwner/$RepoName/releases/latest"
+$ReleaseBaseUrl = "https://dl.pitlane-evo.fr/latest"
+$ReleaseZipUrl = "$ReleaseBaseUrl/agent.zip"
+$LatestReleaseApiUrl = "$ReleaseBaseUrl/version.json"
 $TaskName = "PitLaneAgent"
 
 function Find-AcEvoServer {
@@ -175,7 +174,7 @@ function Get-LatestReleaseInfo {
     try {
         return Invoke-RestMethod -Uri $LatestReleaseApiUrl -UseBasicParsing -Headers @{ "User-Agent" = "PitLaneAgentUpdater" }
     } catch {
-        Add-Log "Impossible de recuperer les infos de release GitHub : $_"
+        Add-Log "Impossible de recuperer le manifest de release : $_"
         return $null
     }
 }
@@ -191,7 +190,7 @@ function Write-VersionFile {
 
     $data = [ordered]@{
         installed_at = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-        source = "github_release"
+        source = "vps_release"
         asset = "agent.zip"
         release_url = $ReleaseZipUrl
         backup_path = $BackupPath
@@ -199,9 +198,8 @@ function Write-VersionFile {
 
     if ($ReleaseInfo) {
         $data.tag_name = $ReleaseInfo.tag_name
-        $data.name = $ReleaseInfo.name
         $data.published_at = $ReleaseInfo.published_at
-        $data.html_url = $ReleaseInfo.html_url
+        $data.commit = $ReleaseInfo.commit
     }
 
     ($data | ConvertTo-Json -Depth 4) | Set-Content -Path $versionPath -Encoding UTF8

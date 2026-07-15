@@ -4,7 +4,7 @@ Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Stop"
-$ReleaseBaseUrl = "https://github.com/JeanBernardMagnien/pitlane-agent/releases/latest/download"
+$ReleaseBaseUrl = "https://dl.pitlane-evo.fr/latest"
 $DownloadDir = Join-Path $env:USERPROFILE "Downloads\PitLaneAgent"
 
 function Add-Log {
