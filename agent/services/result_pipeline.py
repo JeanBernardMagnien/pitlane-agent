@@ -92,6 +92,7 @@ def get_result_pipeline() -> ResultPipeline:
 
 def register_result_launch(instance_id: str, launch_id: int | None, runtime_config: dict) -> dict | None:
     if launch_id in (None, ''):
+        get_result_pipeline().spool.close_result_window(instance_id)
         return None
     return get_result_pipeline().spool.register_launch(instance_id, int(launch_id), runtime_config)
 

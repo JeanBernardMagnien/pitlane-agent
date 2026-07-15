@@ -44,27 +44,31 @@ class ResultArtifactSpool:
         if not isinstance(server, dict):
             raise ValueError('runtime_config.Server requis pour suivre les résultats')
 
-        if server.get('CollectResults') is False:
-            return None
+        collect_results = server.get('CollectResults') is not False
+        correlation_id = str(server.get('ResultCorrelationId') or '').strip() if collect_results else ''
+        upload_url = str(server.get('ResultsPostUrl') or '').strip() if collect_results else ''
+        results_path = str(server.get('ResultsPath') or '').strip().rstrip('/\\') if collect_results else ''
 
-        correlation_id = str(server.get('ResultCorrelationId') or '').strip()
-        upload_url = str(server.get('ResultsPostUrl') or '').strip()
-        results_path = str(server.get('ResultsPath') or '').strip().rstrip('/\\')
-
-        if launch_id <= 0 or not correlation_id or not upload_url or not results_path:
+        if collect_results and (launch_id <= 0 or not correlation_id or not upload_url or not results_path):
             raise ValueError('métadonnées de tentative résultat incomplètes')
 
         with self._lock:
+            if collect_results:
+                path = self._launch_path(launch_id, correlation_id)
+                existing = _safe_json(path)
+                if existing is not None:
+                    return existing
+
             for _ in range(self.stable_scans):
                 self.scan_once()
-            path = self._launch_path(launch_id, correlation_id)
-            existing = _safe_json(path)
-            if existing is not None:
-                return existing
+
+            now = time.time()
+            self._close_open_launches(str(instance_id), now)
+            if not collect_results:
+                return None
 
             results_dir = Path(results_path)
             baseline = sorted(item.name for item in results_dir.glob('*.json') if item.is_file())
-            now = time.time()
             manifest = {
                 'schema_version': 1,
                 'instance_id': str(instance_id),
@@ -94,6 +98,12 @@ class ResultArtifactSpool:
                 created.extend(self._scan_launch(launch, next_registered_at))
 
         return created
+
+    def close_result_window(self, instance_id: str) -> None:
+        with self._lock:
+            for _ in range(self.stable_scans):
+                self.scan_once()
+            self._close_open_launches(str(instance_id), time.time())
 
     def pending(self, now: float | None = None) -> list[dict]:
         now = time.time() if now is None else now
@@ -357,6 +367,11 @@ class ResultArtifactSpool:
         baseline = set(launch.get('baseline_files') or [])
         observed = set(launch.get('observed_files') or [])
         created = []
+        closed_at = launch.get('closed_at_epoch')
+        cutoff = min(
+            value for value in (next_registered_at, float(closed_at) if closed_at is not None else None)
+            if value is not None
+        ) if next_registered_at is not None or closed_at is not None else None
 
         for source_path in sorted(results_dir.glob('*.json')):
             if not source_path.is_file() or source_path.name in baseline or source_path.name in observed:
@@ -370,7 +385,7 @@ class ResultArtifactSpool:
             registered_at = float(launch['registered_at_epoch'])
             if stat.st_mtime < registered_at - 2:
                 continue
-            if next_registered_at is not None and stat.st_mtime >= next_registered_at:
+            if cutoff is not None and stat.st_mtime >= cutoff:
                 continue
             if not self._is_stable(source_path, stat.st_size, stat.st_mtime_ns):
                 continue
@@ -434,6 +449,17 @@ class ResultArtifactSpool:
     def _launch_manifests(self) -> list[dict]:
         manifests = [manifest for path in self.launches_dir.glob('*.json') if (manifest := _safe_json(path))]
         return sorted(manifests, key=lambda item: (str(item.get('instance_id')), float(item.get('registered_at_epoch') or 0)))
+
+    def _close_open_launches(self, instance_id: str, closed_at: float) -> None:
+        for launch in self._launch_manifests():
+            if launch.get('instance_id') != instance_id or launch.get('closed_at_epoch') is not None:
+                continue
+            launch['closed_at'] = _utc_iso(closed_at)
+            launch['closed_at_epoch'] = closed_at
+            self._write_json(
+                self._launch_path(int(launch['launch_id']), launch['result_correlation_id']),
+                launch,
+            )
 
     def _artifact(self, artifact_id: str) -> dict | None:
         return _safe_json(self._artifact_path(artifact_id))

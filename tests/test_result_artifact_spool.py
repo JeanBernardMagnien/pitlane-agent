@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -37,6 +38,47 @@ class ResultArtifactSpoolTest(unittest.TestCase):
 
             self.assertIsNone(manifest)
             self.assertEqual([], list((root / 'spool' / 'launches').glob('*.json')))
+
+    def test_non_collected_launch_closes_previous_result_window(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            results = root / 'results' / 'server3'
+            results.mkdir(parents=True)
+            spool = ResultArtifactSpool(root / 'spool', stable_scans=2)
+            spool.register_launch('server3', 41, self._runtime_config(results))
+
+            quick_config = self._runtime_config(results)
+            quick_config['Server']['CollectResults'] = False
+            self.assertIsNone(spool.register_launch('server3', 42, quick_config))
+
+            launch_path = next((root / 'spool' / 'launches').glob('*.json'))
+            launch = json.loads(launch_path.read_text(encoding='utf-8'))
+            self.assertIsNotNone(launch['closed_at_epoch'])
+
+            quick_result = results / 'results_20260715_190956_practice.json'
+            quick_result.write_text('{"session_type":"Practice","is_completed":true}', encoding='utf-8')
+            boundary = float(launch['closed_at_epoch'])
+            quick_timestamp = boundary + 1
+            os.utime(quick_result, (quick_timestamp, quick_timestamp))
+
+            self.assertEqual([], spool.scan_once())
+            self.assertEqual([], spool.scan_once())
+            self.assertEqual([], spool.inventory())
+            self.assertEqual(1, len(list((root / 'spool' / 'launches').glob('*.json'))))
+
+    def test_technical_launch_boundary_closes_previous_result_window(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            results = root / 'results' / 'server3'
+            results.mkdir(parents=True)
+            spool = ResultArtifactSpool(root / 'spool', stable_scans=2)
+            spool.register_launch('server3', 41, self._runtime_config(results))
+
+            spool.close_result_window('server3')
+
+            launch_path = next((root / 'spool' / 'launches').glob('*.json'))
+            launch = json.loads(launch_path.read_text(encoding='utf-8'))
+            self.assertIsNotNone(launch['closed_at_epoch'])
 
     def test_scan_ignores_baseline_and_enqueues_only_stable_json(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
