@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import psutil
 
 from core import config_store
+from services.player_count_observer import observe_player_count, resolve_player_count
 from services.server_manager import _running
 
 
@@ -174,8 +175,8 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
         clients = data.get('clients')
 
         return {
-            'connected_drivers': int(clients) if isinstance(clients, int) else None,
-            'drivers_seen_at': _utc_now() if isinstance(clients, int) else None,
+            'http_connected_drivers': int(clients) if isinstance(clients, int) else None,
+            'http_drivers_seen_at': _utc_now() if isinstance(clients, int) else None,
             'http_ok': True,
             'http_checked_at': _utc_now(),
             'http_duration_ms': duration_ms,
@@ -184,8 +185,8 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return {
-            'connected_drivers': None,
-            'drivers_seen_at': None,
+            'http_connected_drivers': None,
+            'http_drivers_seen_at': None,
             'http_ok': False,
             'http_checked_at': _utc_now(),
             'http_duration_ms': duration_ms,
@@ -273,8 +274,22 @@ def _running_instance_reports() -> list[dict]:
         }
 
         http_port = instance.get('http_port')
-        if status == 'running' and http_port:
-            report.update(_read_connected_drivers(int(http_port), timeout))
+        if status == 'running':
+            http_observation = _read_connected_drivers(int(http_port), timeout) if http_port else {
+                'http_connected_drivers': None,
+                'http_drivers_seen_at': None,
+                'http_ok': None,
+                'http_checked_at': None,
+                'http_duration_ms': None,
+                'http_error': None,
+            }
+            log_observation = observe_player_count(
+                instance_id,
+                info,
+                config_store.LOGGING_CFG['logs_path'],
+            )
+            process_identity = f"{pid or ''}:{info.get('started_at') or ''}"
+            report.update(resolve_player_count(instance_id, process_identity, http_observation, log_observation))
 
         reports.append(report)
 
@@ -327,6 +342,11 @@ def runtime_report_signature(payload: dict) -> str:
                 'pid': item.get('pid'),
                 'started_at': item.get('started_at'),
                 'connected_drivers': item.get('connected_drivers'),
+                'drivers_source': item.get('drivers_source'),
+                'drivers_conflict': item.get('drivers_conflict'),
+                'drivers_zero_confirmed': item.get('drivers_zero_confirmed'),
+                'log_connected_drivers': item.get('log_connected_drivers'),
+                'http_connected_drivers': item.get('http_connected_drivers'),
                 'http_ok': item.get('http_ok'),
                 'http_error': item.get('http_error'),
             })

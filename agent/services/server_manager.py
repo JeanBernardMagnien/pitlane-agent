@@ -81,6 +81,7 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
         'config': filename,
         'config_loaded_at': now,
         'log_file': log_file,
+        'log_path': log_file.name,
     }
     if filename:
         _last_config[instance_id] = {
@@ -96,7 +97,9 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
 def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
     """Arrête proprement une instance. La dernière config reste dans _last_config."""
     if instance_id not in _running:
-        return {'error': f"Instance {instance_id} non trouvée"}
+        # Stop est une commande idempotente : si le premier accusé s'est perdu après la
+        # disparition du processus, le retry du hub doit pouvoir converger vers le même état.
+        return {'status': 'stopped', 'already_stopped': True}
 
     info = _running[instance_id]
     if info.get('config'):
@@ -111,9 +114,13 @@ def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
+        proc.wait(timeout=5)
 
     if info.get('log_file'):
         info['log_file'].close()
+
+    from services.player_count_observer import forget_player_count
+    forget_player_count(instance_id)
 
     del _running[instance_id]
 

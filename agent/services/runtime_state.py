@@ -51,6 +51,7 @@ def save_runtime_state(logging_cfg: dict) -> None:
             'started_at': info.get('started_at') or time.time(),
             'config': info.get('config'),
             'config_loaded_at': info.get('config_loaded_at'),
+            'log_path': info.get('log_path'),
         }
 
     path.write_text(json.dumps(payload, indent=2), encoding='utf-8')
@@ -86,6 +87,7 @@ def restore_runtime_state(logging_cfg: dict) -> int:
                 'config': info.get('config'),
                 'config_loaded_at': info.get('config_loaded_at'),
                 'log_file': None,
+                'log_path': info.get('log_path'),
             }
             restored += 1
         except Exception:
