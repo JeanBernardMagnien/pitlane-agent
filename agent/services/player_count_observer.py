@@ -8,11 +8,14 @@ PLAYER_COUNT_PATTERN = re.compile(
     r'^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\].*?Server updated:\s*(?P<count>\d+)\s+players?\s*$',
     re.IGNORECASE,
 )
-SESSION_STARTED_PATTERN = re.compile(
-    r'\b(?:START|BEGIN)_SESSION\b(?:\s+|:\s*)(?P<phase>Practice|Qualif(?:y|ication)?|WarmUp|Race)\b',
+SESSION_CREATED_PATTERN = re.compile(
+    r'\b(?:TimeAttackRemote|InstantRaceRemote)\s+'
+    r'(?P<phase>Practice|Qualifying|Warmup|Race)\s+created\b',
     re.IGNORECASE,
 )
 SESSION_ENDED_PATTERN = re.compile(r'\bEND_SESSION\b', re.IGNORECASE)
+TIMED_SESSION_STARTED_PATTERN = re.compile(r'\bOutplap split\b', re.IGNORECASE)
+RACE_STARTED_PATTERN = re.compile(r'\bsetSessionPhase\s+Session\s*$', re.IGNORECASE)
 CRASH_PATTERN = re.compile(r'\[(?:crash)\]|\bFatal error\b', re.IGNORECASE)
 LOG_PLAYER_COUNT_FRESH_SECONDS = 30
 
@@ -141,14 +144,28 @@ class PlayerCountObserver:
                 if count > 0 and state.get('first_driver_seen_at') is None:
                     state['first_driver_seen_at'] = observed_at
 
-            session_started_match = SESSION_STARTED_PATTERN.search(stripped_line)
-            if session_started_match is not None:
-                state['session_phase'] = self._normalize_phase(session_started_match.group('phase'))
+            session_created_match = SESSION_CREATED_PATTERN.search(stripped_line)
+            if session_created_match is not None:
+                state['session_phase'] = self._normalize_phase(session_created_match.group('phase'))
                 state['session_observed_at'] = timestamp
+
+            if (
+                TIMED_SESSION_STARTED_PATTERN.search(stripped_line) is not None
+                and state.get('session_phase') == 'qualifying'
+            ):
                 state['sport_started_at'] = state.get('sport_started_at') or timestamp
 
-            if SESSION_ENDED_PATTERN.search(stripped_line) is not None:
+            if (
+                RACE_STARTED_PATTERN.search(stripped_line) is not None
+                and state.get('session_phase') == 'race'
+            ):
                 state['sport_started_at'] = state.get('sport_started_at') or timestamp
+
+            # END_SESSION confirme la fin d'un mode, mais ne prouve pas qu'une
+            # étape compétitive a été consommée : Practice et Warmup ne le sont
+            # pas en V1, et un mode peut être clos faute de pilote.
+            if SESSION_ENDED_PATTERN.search(stripped_line) is not None:
+                state['session_observed_at'] = timestamp or state.get('session_observed_at')
 
             if CRASH_PATTERN.search(stripped_line) is not None:
                 state['crash_detected_at'] = timestamp
@@ -165,6 +182,7 @@ class PlayerCountObserver:
         return {
             'practice': 'practice',
             'qualify': 'qualifying',
+            'qualifying': 'qualifying',
             'qualification': 'qualifying',
             'warmup': 'warmup',
             'race': 'race',

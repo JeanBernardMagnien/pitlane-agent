@@ -502,6 +502,21 @@ Pense à `-no_lobby` pendant tes tests pour ne pas polluer la liste des serveurs
 
 ---
 
+### 10.1 Marqueurs de session confirmés sur AC EVO 0.8.0
+
+Un cycle réel Practice → Qualification → WarmUp → Race capturé le 16 juillet 2026 confirme que les anciens motifs hypothétiques `START_SESSION`/`BEGIN_SESSION` ne sont pas émis.
+
+- `TimeAttackRemote Practice created`, `TimeAttackRemote Qualifying created`, `TimeAttackRemote Warmup created` et `InstantRaceRemote Race created` identifient le mode courant. La création ne prouve pas encore que le chrono ou la Course a commencé.
+- Pour Practice, Qualification et WarmUp, `Outplap split` coïncide avec le démarrage effectif du chrono après l'entrée en piste.
+- Pour la Course, `setSessionPhase Waiting_For_Players` reste une attente ; `setSessionPhase Session` marque le départ compétitif.
+- `END_SESSION` puis, pour la Course, `setSessionPhase Ended`, confirment la fin de la session.
+- La connexion d'un pilote et la création de sa voiture précèdent ces marqueurs et ne prouvent pas une consommation sportive.
+- En V1 PitLane, Qualification et Race sont compétitives ; Practice et WarmUp restent des étapes techniques. Le parseur conserve donc la phase courante pour les quatre types, mais ne renseigne `sport_started_at` que pour une Qualification réellement lancée ou une Course passée en phase `Session`.
+
+AC EVO peut recycler son programme lorsque le serveur redevient vide sans arrêter son processus. Ce recyclage reste dans la même tentative PitLane ; seule l'apparition de plusieurs résultats compétitifs éligibles crée une ambiguïté métier.
+
+---
+
 ## 11. Prochaines étapes suggérées
 
 Si tu veux qu'on aille plus loin, dans l'ordre de rentabilité probable :

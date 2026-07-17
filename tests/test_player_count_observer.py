@@ -44,29 +44,73 @@ class PlayerCountObserverTest(unittest.TestCase):
             self.assertEqual(0, second['log_connected_drivers'])
             self.assertTrue(second['log_drivers_seen_at'].endswith('Z'))
 
-    def test_preserves_session_driver_and_crash_facts(self):
+    def test_tracks_real_ac_evo_session_markers_and_competitive_start(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
             log_path.write_text(
-                '[2026-07-17 12:00:01.000] [server] [info] START_SESSION Practice\n'
+                '[2026-07-17 12:00:01.000] [gameplay] [info] TimeAttackRemote Practice created\n'
                 '[2026-07-17 12:00:02.000] [server] [info] Server updated: 1 players\n'
-                '[2026-07-17 12:00:03.000] [crash] [critical] Fatal error, simulated crash\n',
+                '[2026-07-17 12:00:03.000] [gameplay] [info] Outplap split\n',
                 encoding='utf-8',
             )
             observer = PlayerCountObserver()
-
-            observation = observer.observe('server3', {
+            runtime_info = {
                 'process': _Process(),
                 'started_at': 1.0,
                 'log_path': str(log_path),
-            }, temporary_directory)
+            }
 
-            self.assertEqual('practice', observation['session_phase'])
-            self.assertTrue(observation['sport_started_at'].endswith('Z'))
-            self.assertTrue(observation['first_driver_seen_at'].endswith('Z'))
-            self.assertTrue(observation['crash_detected_at'].endswith('Z'))
-            self.assertIn('Fatal error', observation['crash_message'])
-            self.assertTrue(observation['log_observed_from_start'])
+            practice = observer.observe('server3', runtime_info, temporary_directory)
+
+            self.assertEqual('practice', practice['session_phase'])
+            self.assertIsNone(practice['sport_started_at'])
+            self.assertTrue(practice['first_driver_seen_at'].endswith('Z'))
+            self.assertTrue(practice['log_observed_from_start'])
+
+            with log_path.open('a', encoding='utf-8') as handle:
+                handle.write(
+                    '[2026-07-17 12:00:04.000] [gameplay] [info] END_SESSION All cars pitted\n'
+                    '[2026-07-17 12:00:05.000] [gameplay] [info] TimeAttackRemote Qualifying created\n'
+                    '[2026-07-17 12:00:06.000] [gameplay] [info] Outplap split\n'
+                    '[2026-07-17 12:00:07.000] [crash] [critical] Fatal error, simulated crash\n'
+                )
+
+            qualifying = observer.observe('server3', runtime_info, temporary_directory)
+
+            self.assertEqual('qualifying', qualifying['session_phase'])
+            self.assertTrue(qualifying['sport_started_at'].endswith('Z'))
+            self.assertTrue(qualifying['crash_detected_at'].endswith('Z'))
+            self.assertIn('Fatal error', qualifying['crash_message'])
+
+    def test_race_waiting_does_not_consume_sport_until_session_phase(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
+            log_path.write_text(
+                '[2026-07-17 12:00:01.000] [gameplay] [info] InstantRaceRemote Race created\n'
+                '[2026-07-17 12:00:02.000] [gameplay] [info] [SERVER] setSessionPhase Waiting_For_Players\n',
+                encoding='utf-8',
+            )
+            observer = PlayerCountObserver()
+            runtime_info = {
+                'process': _Process(),
+                'started_at': 1.0,
+                'log_path': str(log_path),
+            }
+
+            waiting = observer.observe('server3', runtime_info, temporary_directory)
+
+            self.assertEqual('race', waiting['session_phase'])
+            self.assertIsNone(waiting['sport_started_at'])
+
+            with log_path.open('a', encoding='utf-8') as handle:
+                handle.write(
+                    '[2026-07-17 12:00:03.000] [gameplay] [info] '
+                    '[SERVER] setSessionPhase Session\n'
+                )
+
+            started = observer.observe('server3', runtime_info, temporary_directory)
+
+            self.assertTrue(started['sport_started_at'].endswith('Z'))
 
     def test_empty_log_is_a_complete_observation_without_inventing_sport_start(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
