@@ -45,7 +45,7 @@ def create_app():
 _watcher = threading.Thread(target=_watch_config, daemon=True)
 _watcher.start()
 
-restored_instances = restore_runtime_state(config_store.LOGGING_CFG)
+restored_instances = restore_runtime_state(config_store.LOGGING_CFG, config_store.GAME_CFG)
 if restored_instances:
     logging.info('[runtime-state] %d instance(s) restaurée(s)', restored_instances)
 

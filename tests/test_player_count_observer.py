@@ -44,6 +44,49 @@ class PlayerCountObserverTest(unittest.TestCase):
             self.assertEqual(0, second['log_connected_drivers'])
             self.assertTrue(second['log_drivers_seen_at'].endswith('Z'))
 
+    def test_preserves_session_driver_and_crash_facts(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
+            log_path.write_text(
+                '[2026-07-17 12:00:01.000] [server] [info] START_SESSION Practice\n'
+                '[2026-07-17 12:00:02.000] [server] [info] Server updated: 1 players\n'
+                '[2026-07-17 12:00:03.000] [crash] [critical] Fatal error, simulated crash\n',
+                encoding='utf-8',
+            )
+            observer = PlayerCountObserver()
+
+            observation = observer.observe('server3', {
+                'process': _Process(),
+                'started_at': 1.0,
+                'log_path': str(log_path),
+            }, temporary_directory)
+
+            self.assertEqual('practice', observation['session_phase'])
+            self.assertTrue(observation['sport_started_at'].endswith('Z'))
+            self.assertTrue(observation['first_driver_seen_at'].endswith('Z'))
+            self.assertTrue(observation['crash_detected_at'].endswith('Z'))
+            self.assertIn('Fatal error', observation['crash_message'])
+            self.assertTrue(observation['log_observed_from_start'])
+
+    def test_empty_log_is_a_complete_observation_without_inventing_sport_start(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
+            log_path.write_text(
+                '[2026-07-17 12:00:01.000] [server] [info] Server Config loaded\n',
+                encoding='utf-8',
+            )
+            observer = PlayerCountObserver()
+
+            observation = observer.observe('server3', {
+                'process': _Process(),
+                'started_at': 1.0,
+                'log_path': str(log_path),
+            }, temporary_directory)
+
+            self.assertIsNone(observation['first_driver_seen_at'])
+            self.assertIsNone(observation['sport_started_at'])
+            self.assertTrue(observation['log_observed_from_start'])
+
     def test_fresh_log_and_http_disagreement_is_explicit(self):
         http = {
             'http_connected_drivers': 0,

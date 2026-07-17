@@ -8,6 +8,12 @@ PLAYER_COUNT_PATTERN = re.compile(
     r'^\[(?P<timestamp>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\].*?Server updated:\s*(?P<count>\d+)\s+players?\s*$',
     re.IGNORECASE,
 )
+SESSION_STARTED_PATTERN = re.compile(
+    r'\b(?:START|BEGIN)_SESSION\b(?:\s+|:\s*)(?P<phase>Practice|Qualif(?:y|ication)?|WarmUp|Race)\b',
+    re.IGNORECASE,
+)
+SESSION_ENDED_PATTERN = re.compile(r'\bEND_SESSION\b', re.IGNORECASE)
+CRASH_PATTERN = re.compile(r'\[(?:crash)\]|\bFatal error\b', re.IGNORECASE)
 LOG_PLAYER_COUNT_FRESH_SECONDS = 30
 
 
@@ -17,7 +23,7 @@ def _utc_iso_from_log_timestamp(value: str) -> str:
 
 
 class PlayerCountObserver:
-    """Lit chaque log AC EVO de façon incrémentale et conserve son dernier compteur absolu."""
+    """Observe incrémentalement les faits runtime fiables exposés par le log AC EVO."""
 
     def __init__(self):
         self._states: dict[str, dict] = {}
@@ -42,6 +48,13 @@ class PlayerCountObserver:
                     'buffer': '',
                     'count': None,
                     'observed_at': None,
+                    'first_driver_seen_at': None,
+                    'session_phase': None,
+                    'session_observed_at': None,
+                    'sport_started_at': None,
+                    'crash_detected_at': None,
+                    'crash_message': None,
+                    'log_observed_from_start': True,
                 }
                 self._states[instance_id] = state
 
@@ -50,6 +63,13 @@ class PlayerCountObserver:
             return {
                 'log_connected_drivers': state.get('count'),
                 'log_drivers_seen_at': state.get('observed_at'),
+                'first_driver_seen_at': state.get('first_driver_seen_at'),
+                'session_phase': state.get('session_phase'),
+                'session_observed_at': state.get('session_observed_at'),
+                'sport_started_at': state.get('sport_started_at'),
+                'crash_detected_at': state.get('crash_detected_at'),
+                'crash_message': state.get('crash_message'),
+                'log_observed_from_start': bool(state.get('log_observed_from_start')),
             }
 
     def forget(self, instance_id: str) -> None:
@@ -81,7 +101,19 @@ class PlayerCountObserver:
         try:
             size = log_path.stat().st_size
             if size < int(state.get('offset') or 0):
-                state.update(offset=0, buffer='', count=None, observed_at=None)
+                state.update(
+                    offset=0,
+                    buffer='',
+                    count=None,
+                    observed_at=None,
+                    first_driver_seen_at=None,
+                    session_phase=None,
+                    session_observed_at=None,
+                    sport_started_at=None,
+                    crash_detected_at=None,
+                    crash_message=None,
+                    log_observed_from_start=False,
+                )
 
             with log_path.open('r', encoding='utf-8', errors='replace') as handle:
                 handle.seek(int(state.get('offset') or 0))
@@ -98,18 +130,58 @@ class PlayerCountObserver:
             state['buffer'] = lines.pop()
 
         for line in lines:
-            match = PLAYER_COUNT_PATTERN.search(line.strip())
-            if match is None:
-                continue
+            stripped_line = line.strip()
+            timestamp = self._line_timestamp(stripped_line)
+            player_count_match = PLAYER_COUNT_PATTERN.search(stripped_line)
+            if player_count_match is not None:
+                count = int(player_count_match.group('count'))
+                observed_at = _utc_iso_from_log_timestamp(player_count_match.group('timestamp'))
+                state['count'] = count
+                state['observed_at'] = observed_at
+                if count > 0 and state.get('first_driver_seen_at') is None:
+                    state['first_driver_seen_at'] = observed_at
 
-            state['count'] = int(match.group('count'))
-            state['observed_at'] = _utc_iso_from_log_timestamp(match.group('timestamp'))
+            session_started_match = SESSION_STARTED_PATTERN.search(stripped_line)
+            if session_started_match is not None:
+                state['session_phase'] = self._normalize_phase(session_started_match.group('phase'))
+                state['session_observed_at'] = timestamp
+                state['sport_started_at'] = state.get('sport_started_at') or timestamp
+
+            if SESSION_ENDED_PATTERN.search(stripped_line) is not None:
+                state['sport_started_at'] = state.get('sport_started_at') or timestamp
+
+            if CRASH_PATTERN.search(stripped_line) is not None:
+                state['crash_detected_at'] = timestamp
+                state['crash_message'] = stripped_line[-500:]
+
+    @staticmethod
+    def _line_timestamp(line: str) -> str | None:
+        match = re.match(r'^\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})\]', line)
+        return _utc_iso_from_log_timestamp(match.group(1)) if match else None
+
+    @staticmethod
+    def _normalize_phase(value: str) -> str:
+        normalized = value.strip().lower()
+        return {
+            'practice': 'practice',
+            'qualify': 'qualifying',
+            'qualification': 'qualifying',
+            'warmup': 'warmup',
+            'race': 'race',
+        }.get(normalized, normalized)
 
     @staticmethod
     def _empty_observation() -> dict:
         return {
             'log_connected_drivers': None,
             'log_drivers_seen_at': None,
+            'first_driver_seen_at': None,
+            'session_phase': None,
+            'session_observed_at': None,
+            'sport_started_at': None,
+            'crash_detected_at': None,
+            'crash_message': None,
+            'log_observed_from_start': False,
         }
 
 

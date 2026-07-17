@@ -11,7 +11,8 @@ import psutil
 
 from core import config_store
 from services.player_count_observer import observe_player_count, resolve_player_count
-from services.server_manager import _running
+from services.process_supervisor import process_supervisor
+from services.server_manager import terminal_process_payload
 
 
 DEFAULT_REPORT_INTERVAL_SECONDS = 1
@@ -230,15 +231,28 @@ def _process_cpu_percent(pid: int, process: psutil.Process) -> float | None:
 def _running_instance_reports() -> list[dict]:
     reports = []
     timeout = _http_timeout()
+    process_exit_observed = False
 
-    for instance_id, info in list(_running.items()):
+    for instance_id, info in process_supervisor.snapshot_running():
         proc = info.get('process')
         instance = info.get('instance') or {}
 
         if not proc:
             continue
 
+        log_observation = observe_player_count(
+            instance_id,
+            info,
+            config_store.LOGGING_CFG['logs_path'],
+        )
+        info['game_observation'] = log_observation
+
         poll = proc.poll()
+        if poll is not None:
+            process_supervisor.observe_exit(instance_id)
+            process_exit_observed = True
+            continue
+
         status = 'running' if poll is None else 'stopped'
         pid = proc.pid if poll is None else None
         started_at = None
@@ -283,17 +297,44 @@ def _running_instance_reports() -> list[dict]:
                 'http_duration_ms': None,
                 'http_error': None,
             }
-            log_observation = observe_player_count(
-                instance_id,
-                info,
-                config_store.LOGGING_CFG['logs_path'],
-            )
             process_identity = f"{pid or ''}:{info.get('started_at') or ''}"
             report.update(resolve_player_count(instance_id, process_identity, http_observation, log_observation))
+            report.update(_game_observation_payload(log_observation))
 
         reports.append(report)
 
+    if process_exit_observed:
+        try:
+            from services.runtime_state import save_runtime_state
+            save_runtime_state(config_store.LOGGING_CFG)
+        except Exception as exc:
+            logging.warning('[runtime-state] Impossible de persister une sortie process: %s', exc)
+
+    for instance_id, terminal in process_supervisor.snapshot_terminated():
+        instance = terminal.get('instance') or {}
+        reports.append({
+            'id': instance_id,
+            'status': 'stopped',
+            'pid': None,
+            'started_at': None,
+            'uptime_seconds': None,
+            'cpu_percent': None,
+            'ram_mb': None,
+            **terminal_process_payload(terminal),
+        })
+
     return reports
+
+
+def _game_observation_payload(observation: dict) -> dict:
+    return {
+        'session_phase': observation.get('session_phase'),
+        'session_observed_at': observation.get('session_observed_at'),
+        'sport_started_at': observation.get('sport_started_at'),
+        'first_driver_seen_at': observation.get('first_driver_seen_at'),
+        'log_observed_from_start': bool(observation.get('log_observed_from_start')),
+        'crash_detected_at': observation.get('crash_detected_at'),
+    }
 
 
 def build_runtime_report() -> dict:
@@ -312,7 +353,7 @@ def build_runtime_report() -> dict:
 
     return {
         'agent': {
-            'version': '0.2.0',
+            'version': '0.3.0',
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,
@@ -349,6 +390,16 @@ def runtime_report_signature(payload: dict) -> str:
                 'http_connected_drivers': item.get('http_connected_drivers'),
                 'http_ok': item.get('http_ok'),
                 'http_error': item.get('http_error'),
+                'session_phase': item.get('session_phase'),
+                'session_observed_at': item.get('session_observed_at'),
+                'sport_started_at': item.get('sport_started_at'),
+                'first_driver_seen_at': item.get('first_driver_seen_at'),
+                'log_observed_from_start': item.get('log_observed_from_start'),
+                'exit_code': item.get('exit_code'),
+                'exit_observed_at': item.get('exit_observed_at'),
+                'stop_requested_at': item.get('stop_requested_at'),
+                'stop_reason': item.get('stop_reason'),
+                'crash_detected_at': item.get('crash_detected_at'),
             })
 
     comparable_instances.sort(key=lambda item: item['id'])

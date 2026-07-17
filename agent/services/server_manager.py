@@ -6,10 +6,11 @@ import json as _json
 from pathlib import Path
 from datetime import datetime, timezone
 
+from services.process_supervisor import process_supervisor
 from services.server_process_command import build_process_args
 
 # { instance_id → { process, instance, started_at, config, config_loaded_at, log_file } }
-_running = {}
+_running = process_supervisor.running
 
 # Survit au stop/crash — garde la dernière config connue par instance
 # { instance_id → { config, config_loaded_at } }
@@ -55,6 +56,27 @@ def get_runtime_instances() -> list[dict]:
     return [info['instance'] for info in _running.values() if info.get('instance')]
 
 
+def _process_identity(process, exe_path: Path) -> tuple[float | None, str]:
+    try:
+        ps_process = psutil.Process(process.pid)
+        return float(ps_process.create_time()), str(Path(ps_process.exe()).resolve())
+    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError):
+        return None, str(exe_path.resolve())
+
+
+def _observe_game_log(instance_id: str, info: dict, logging_cfg: dict | None) -> None:
+    if not logging_cfg:
+        return
+
+    from services.player_count_observer import observe_player_count
+
+    info['game_observation'] = observe_player_count(
+        instance_id,
+        info,
+        logging_cfg.get('logs_path') or 'logs',
+    )
+
+
 def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=None):
     instance_id = instance_cfg['id']
 
@@ -72,9 +94,10 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
         stdout=log_file,
         stderr=log_file,
     )
+    process_create_time, executable_path = _process_identity(process, exe_path)
 
     now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-    _running[instance_id] = {
+    runtime_info = {
         'process': process,
         'instance': instance_cfg,
         'started_at': time.time(),
@@ -82,7 +105,14 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
         'config_loaded_at': now,
         'log_file': log_file,
         'log_path': log_file.name,
+        'process_create_time': process_create_time,
+        'executable_path': executable_path,
+        'exit_code_available': True,
+        'stop_requested_at': None,
+        'stop_reason': None,
+        'game_observation': {},
     }
+    process_supervisor.register(instance_id, runtime_info)
     if filename:
         _last_config[instance_id] = {
             'config': filename,
@@ -94,12 +124,21 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
     return {'status': 'started', 'pid': process.pid}
 
 
-def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
+def stop_instance(
+    instance_id: str,
+    logging_cfg: dict | None = None,
+    reason: str = 'manual_stop',
+) -> dict:
     """Arrête proprement une instance. La dernière config reste dans _last_config."""
     if instance_id not in _running:
+        terminal = process_supervisor.terminal(instance_id)
         # Stop est une commande idempotente : si le premier accusé s'est perdu après la
         # disparition du processus, le retry du hub doit pouvoir converger vers le même état.
-        return {'status': 'stopped', 'already_stopped': True}
+        return {
+            'status': 'stopped',
+            'already_stopped': True,
+            **terminal_process_payload(terminal),
+        }
 
     info = _running[instance_id]
     if info.get('config'):
@@ -109,6 +148,11 @@ def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
         }
 
     proc = info['process']
+    _observe_game_log(instance_id, info, logging_cfg)
+    process_supervisor.request_stop(instance_id, reason)
+    if logging_cfg:
+        _save_runtime_state_safe(logging_cfg)
+
     try:
         proc.terminate()
         proc.wait(timeout=10)
@@ -116,18 +160,19 @@ def stop_instance(instance_id: str, logging_cfg: dict | None = None) -> dict:
         proc.kill()
         proc.wait(timeout=5)
 
-    if info.get('log_file'):
-        info['log_file'].close()
+    _observe_game_log(instance_id, info, logging_cfg)
+    terminal = process_supervisor.observe_exit(instance_id)
 
     from services.player_count_observer import forget_player_count
     forget_player_count(instance_id)
 
-    del _running[instance_id]
-
     if logging_cfg:
         _save_runtime_state_safe(logging_cfg)
 
-    return {'status': 'stopped'}
+    return {
+        'status': 'stopped',
+        **terminal_process_payload(terminal),
+    }
 
 
 def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
@@ -135,7 +180,7 @@ def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
                      seasondefinition_b64: str, filename: str | None = None,
                      before_start=None) -> dict:
     """Stop + Start en conservant le filename."""
-    stop_instance(instance_id, logging_cfg)
+    stop_instance(instance_id, logging_cfg, reason='preempted')
     if before_start:
         before_start()
     time.sleep(2)
@@ -144,7 +189,17 @@ def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
 
 def get_last_config(instance_id: str) -> dict:
     """Retourne la dernière config connue pour une instance (même après stop)."""
-    return _last_config.get(instance_id, {})
+    if instance_id in _last_config:
+        return _last_config[instance_id]
+
+    terminal = process_supervisor.terminal(instance_id) or {}
+    if terminal.get('config'):
+        return {
+            'config': terminal.get('config'),
+            'config_loaded_at': terminal.get('config_loaded_at'),
+        }
+
+    return {}
 
 
 def get_instance_status(instance_cfg: dict) -> dict:
@@ -154,17 +209,16 @@ def get_instance_status(instance_cfg: dict) -> dict:
     http_port = instance_cfg.get('http_port')
 
     if not info or info['process'].poll() is not None:
-        if instance_id in _running:
-            dead_info = _running.pop(instance_id)
-            if dead_info.get('log_file'):
-                dead_info['log_file'].close()
-            if dead_info.get('config'):
+        if info:
+            _observe_game_log(instance_id, info, None)
+            if info.get('config'):
                 _last_config[instance_id] = {
-                    'config': dead_info['config'],
-                    'config_loaded_at': dead_info.get('config_loaded_at'),
+                    'config': info['config'],
+                    'config_loaded_at': info.get('config_loaded_at'),
                 }
+            process_supervisor.observe_exit(instance_id)
 
-        last = _last_config.get(instance_id, {})
+        last = get_last_config(instance_id)
         return {
             'id': instance_id,
             'name': instance_cfg['name'],
@@ -178,6 +232,7 @@ def get_instance_status(instance_cfg: dict) -> dict:
             'active_config_loaded_at': last.get('config_loaded_at'),
             'tcp_port': instance_cfg.get('tcp_port'),
             'http_port': instance_cfg.get('http_port'),
+            **terminal_process_payload(process_supervisor.terminal(instance_id)),
         }
 
     pid = info['process'].pid
@@ -213,3 +268,23 @@ def list_configs(configs_path: str) -> list:
     if not path.exists():
         return []
     return [f.name for f in path.glob('*.json')]
+
+
+def terminal_process_payload(terminal: dict | None) -> dict:
+    if not terminal:
+        return {}
+
+    observation = terminal.get('game_observation') or {}
+
+    return {
+        'exit_code': terminal.get('exit_code'),
+        'exit_observed_at': terminal.get('exit_observed_at'),
+        'stop_requested_at': terminal.get('stop_requested_at'),
+        'stop_reason': terminal.get('stop_reason'),
+        'crash_detected_at': observation.get('crash_detected_at'),
+        'session_phase': observation.get('session_phase'),
+        'session_observed_at': observation.get('session_observed_at'),
+        'sport_started_at': observation.get('sport_started_at'),
+        'first_driver_seen_at': observation.get('first_driver_seen_at'),
+        'log_observed_from_start': bool(observation.get('log_observed_from_start')),
+    }

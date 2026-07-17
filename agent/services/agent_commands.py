@@ -261,7 +261,10 @@ def start_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
 
 
 def stop_instance_command(instance_id: str, body: dict | None = None) -> tuple[dict, int]:
-    result = stop_instance(instance_id, config_store.LOGGING_CFG)
+    body = body or {}
+    requested_reason = str(body.get('stop_reason') or 'manual_stop').strip()
+    stop_reason = requested_reason if requested_reason in {'manual_stop', 'normal', 'preempted'} else 'manual_stop'
+    result = stop_instance(instance_id, config_store.LOGGING_CFG, reason=stop_reason)
     return result, 409 if 'error' in result else 200
 
 
