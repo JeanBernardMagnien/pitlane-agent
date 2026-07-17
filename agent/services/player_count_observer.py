@@ -13,7 +13,6 @@ SESSION_CREATED_PATTERN = re.compile(
     r'(?P<phase>Practice|Qualifying|Warmup|Race)\s+created\b',
     re.IGNORECASE,
 )
-SESSION_ENDED_PATTERN = re.compile(r'\bEND_SESSION\b', re.IGNORECASE)
 TIMED_SESSION_STARTED_PATTERN = re.compile(r'\bOutplap split\b', re.IGNORECASE)
 RACE_STARTED_PATTERN = re.compile(r'\bsetSessionPhase\s+Session\s*$', re.IGNORECASE)
 CRASH_PATTERN = re.compile(r'\[(?:crash)\]|\bFatal error\b', re.IGNORECASE)
@@ -160,12 +159,6 @@ class PlayerCountObserver:
                 and state.get('session_phase') == 'race'
             ):
                 state['sport_started_at'] = state.get('sport_started_at') or timestamp
-
-            # END_SESSION confirme la fin d'un mode, mais ne prouve pas qu'une
-            # étape compétitive a été consommée : Practice et Warmup ne le sont
-            # pas en V1, et un mode peut être clos faute de pilote.
-            if SESSION_ENDED_PATTERN.search(stripped_line) is not None:
-                state['session_observed_at'] = timestamp or state.get('session_observed_at')
 
             if CRASH_PATTERN.search(stripped_line) is not None:
                 state['crash_detected_at'] = timestamp

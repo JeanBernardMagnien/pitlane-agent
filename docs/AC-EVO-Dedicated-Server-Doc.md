@@ -509,7 +509,7 @@ Un cycle réel Practice → Qualification → WarmUp → Race capturé le 16 jui
 - `TimeAttackRemote Practice created`, `TimeAttackRemote Qualifying created`, `TimeAttackRemote Warmup created` et `InstantRaceRemote Race created` identifient le mode courant. La création ne prouve pas encore que le chrono ou la Course a commencé.
 - Pour Practice, Qualification et WarmUp, `Outplap split` coïncide avec le démarrage effectif du chrono après l'entrée en piste.
 - Pour la Course, `setSessionPhase Waiting_For_Players` reste une attente ; `setSessionPhase Session` marque le départ compétitif.
-- `END_SESSION` puis, pour la Course, `setSessionPhase Ended`, confirment la fin de la session.
+- `END_SESSION` est générique et souvent répété pour tous les types de session ; il ne permet ni d'identifier une Course ni de conclure seul une fin sportive. Pour la Course, `setSessionPhase Ended` est plus spécifique, mais le résultat compétitif retenu reste l'autorité métier.
 - La connexion d'un pilote et la création de sa voiture précèdent ces marqueurs et ne prouvent pas une consommation sportive.
 - En V1 PitLane, Qualification et Race sont compétitives ; Practice et WarmUp restent des étapes techniques. Le parseur conserve donc la phase courante pour les quatre types, mais ne renseigne `sport_started_at` que pour une Qualification réellement lancée ou une Course passée en phase `Session`.
 
