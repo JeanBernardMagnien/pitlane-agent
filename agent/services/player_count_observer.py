@@ -54,6 +54,7 @@ class PlayerCountObserver:
                     'session_phase': None,
                     'session_observed_at': None,
                     'sport_started_at': None,
+                    'race_started_at': None,
                     'crash_detected_at': None,
                     'crash_message': None,
                     'log_observed_from_start': True,
@@ -69,6 +70,7 @@ class PlayerCountObserver:
                 'session_phase': state.get('session_phase'),
                 'session_observed_at': state.get('session_observed_at'),
                 'sport_started_at': state.get('sport_started_at'),
+                'race_started_at': state.get('race_started_at'),
                 'crash_detected_at': state.get('crash_detected_at'),
                 'crash_message': state.get('crash_message'),
                 'log_observed_from_start': bool(state.get('log_observed_from_start')),
@@ -112,6 +114,7 @@ class PlayerCountObserver:
                     session_phase=None,
                     session_observed_at=None,
                     sport_started_at=None,
+                    race_started_at=None,
                     crash_detected_at=None,
                     crash_message=None,
                     log_observed_from_start=False,
@@ -159,6 +162,7 @@ class PlayerCountObserver:
                 and state.get('session_phase') == 'race'
             ):
                 state['sport_started_at'] = state.get('sport_started_at') or timestamp
+                state['race_started_at'] = state.get('race_started_at') or timestamp
 
             if CRASH_PATTERN.search(stripped_line) is not None:
                 state['crash_detected_at'] = timestamp
@@ -190,6 +194,7 @@ class PlayerCountObserver:
             'session_phase': None,
             'session_observed_at': None,
             'sport_started_at': None,
+            'race_started_at': None,
             'crash_detected_at': None,
             'crash_message': None,
             'log_observed_from_start': False,

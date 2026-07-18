@@ -331,6 +331,7 @@ def _game_observation_payload(observation: dict) -> dict:
         'session_phase': observation.get('session_phase'),
         'session_observed_at': observation.get('session_observed_at'),
         'sport_started_at': observation.get('sport_started_at'),
+        'race_started_at': observation.get('race_started_at'),
         'first_driver_seen_at': observation.get('first_driver_seen_at'),
         'log_observed_from_start': bool(observation.get('log_observed_from_start')),
         'crash_detected_at': observation.get('crash_detected_at'),
@@ -353,7 +354,7 @@ def build_runtime_report() -> dict:
 
     return {
         'agent': {
-            'version': '0.3.1',
+            'version': '0.3.2',
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,
@@ -393,6 +394,7 @@ def runtime_report_signature(payload: dict) -> str:
                 'session_phase': item.get('session_phase'),
                 'session_observed_at': item.get('session_observed_at'),
                 'sport_started_at': item.get('sport_started_at'),
+                'race_started_at': item.get('race_started_at'),
                 'first_driver_seen_at': item.get('first_driver_seen_at'),
                 'log_observed_from_start': item.get('log_observed_from_start'),
                 'exit_code': item.get('exit_code'),

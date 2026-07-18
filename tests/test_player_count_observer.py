@@ -86,8 +86,10 @@ class PlayerCountObserverTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
             log_path.write_text(
-                '[2026-07-17 12:00:01.000] [gameplay] [info] InstantRaceRemote Race created\n'
-                '[2026-07-17 12:00:02.000] [gameplay] [info] [SERVER] setSessionPhase Waiting_For_Players\n',
+                '[2026-07-17 12:00:01.000] [gameplay] [info] TimeAttackRemote Qualifying created\n'
+                '[2026-07-17 12:00:02.000] [gameplay] [info] Outplap split\n'
+                '[2026-07-17 12:00:03.000] [gameplay] [info] InstantRaceRemote Race created\n'
+                '[2026-07-17 12:00:04.000] [gameplay] [info] [SERVER] setSessionPhase Waiting_For_Players\n',
                 encoding='utf-8',
             )
             observer = PlayerCountObserver()
@@ -100,17 +102,20 @@ class PlayerCountObserverTest(unittest.TestCase):
             waiting = observer.observe('server3', runtime_info, temporary_directory)
 
             self.assertEqual('race', waiting['session_phase'])
-            self.assertIsNone(waiting['sport_started_at'])
+            self.assertTrue(waiting['sport_started_at'].endswith('Z'))
+            self.assertIsNone(waiting['race_started_at'])
 
             with log_path.open('a', encoding='utf-8') as handle:
                 handle.write(
-                    '[2026-07-17 12:00:03.000] [gameplay] [info] '
+                    '[2026-07-17 12:00:05.000] [gameplay] [info] '
                     '[SERVER] setSessionPhase Session\n'
                 )
 
             started = observer.observe('server3', runtime_info, temporary_directory)
 
             self.assertTrue(started['sport_started_at'].endswith('Z'))
+            self.assertTrue(started['race_started_at'].endswith('Z'))
+            self.assertNotEqual(started['sport_started_at'], started['race_started_at'])
 
     def test_empty_log_is_a_complete_observation_without_inventing_sport_start(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
