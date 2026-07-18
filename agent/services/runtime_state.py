@@ -37,7 +37,7 @@ def runtime_state_path(logging_cfg: dict) -> Path:
 def save_runtime_state(logging_cfg: dict) -> None:
     path = runtime_state_path(logging_cfg)
     payload = {
-        'schema_version': 2,
+        'schema_version': 3,
         'running': {},
         'terminated': {},
     }
@@ -54,6 +54,7 @@ def save_runtime_state(logging_cfg: dict) -> None:
             'instance': instance,
             'started_at': info.get('started_at') or time.time(),
             'config': info.get('config'),
+            'command_id': info.get('command_id'),
             'config_loaded_at': info.get('config_loaded_at'),
             'log_path': info.get('log_path'),
             'process_create_time': info.get('process_create_time'),
@@ -110,6 +111,7 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
                 'instance': info.get('instance') or {'id': instance_id},
                 'started_at': float(info.get('started_at') or time.time()),
                 'config': info.get('config'),
+                'command_id': info.get('command_id'),
                 'config_loaded_at': info.get('config_loaded_at'),
                 'log_file': None,
                 'log_path': info.get('log_path'),

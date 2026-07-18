@@ -13,6 +13,42 @@ from services import server_manager
 
 
 class ServerManagerProcessArgumentsTest(unittest.TestCase):
+    def tearDown(self):
+        server_manager._running.clear()
+
+    def test_same_durable_command_recovers_existing_process_without_restarting(self):
+        process = MagicMock()
+        process.pid = 4321
+        process.poll.return_value = None
+        server_manager._running['server3'] = {
+            'process': process,
+            'command_id': '4cf3a345-baa4-43af-a6f0-2f425da4a490',
+        }
+
+        result = server_manager.already_executed_command(
+            'server3',
+            '4cf3a345-baa4-43af-a6f0-2f425da4a490',
+        )
+
+        self.assertEqual({
+            'status': 'started',
+            'pid': 4321,
+            'already_executed': True,
+        }, result)
+
+    def test_other_command_does_not_reuse_existing_process(self):
+        process = MagicMock()
+        process.poll.return_value = None
+        server_manager._running['server3'] = {
+            'process': process,
+            'command_id': '4cf3a345-baa4-43af-a6f0-2f425da4a490',
+        }
+
+        self.assertIsNone(server_manager.already_executed_command(
+            'server3',
+            'c4b8a3df-082a-428c-81ee-f57c1c560a14',
+        ))
+
     def test_stop_is_idempotent_when_instance_is_already_absent(self):
         result = server_manager.stop_instance('missing-instance')
 

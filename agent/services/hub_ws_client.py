@@ -6,6 +6,13 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, urlunparse
 
 from services.agent_commands import execute_agent_command
+from services.agent_command_journal import (
+    AgentCommandConflict,
+    AgentCommandContractError,
+    StaleAgentCommand,
+    get_agent_command_journal,
+)
+from services.durable_command_executor import DurableCommandCoordinator
 from services.runtime_reporter import (
     _agent_token,
     _coerce_report_interval,
@@ -22,6 +29,8 @@ DEFAULT_WEBSOCKET_ENDPOINT = '/api/agent/ws'
 _client_threads: list[threading.Thread] = []
 _stop_event = threading.Event()
 _command_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='hub-ws-command')
+_durable_coordinator = None
+_durable_coordinator_lock = threading.Lock()
 
 
 def _hub_ws_url(hub_cfg: dict) -> str | None:
@@ -89,7 +98,7 @@ def _send_command_result(ws, send_lock: threading.Lock, command_id, future) -> N
         pass
 
 
-def _handle_command(ws, send_lock: threading.Lock, message: dict) -> None:
+def _handle_legacy_command(ws, send_lock: threading.Lock, message: dict) -> None:
     command_id = message.get('id')
     command = message.get('command')
     payload = message.get('payload') or {}
@@ -119,6 +128,137 @@ def _handle_command(ws, send_lock: threading.Lock, message: dict) -> None:
         command_id,
         completed,
     ))
+
+
+def _send_command_ack(
+    ws,
+    send_lock: threading.Lock,
+    record: dict,
+    response: dict | None = None,
+) -> None:
+    status = str(record.get('status') or '')
+    occurred_at = (
+        record.get('completed_at')
+        if status in ('succeeded', 'failed')
+        else record.get('executing_at')
+        if status == 'executing'
+        else record.get('received_at')
+    )
+    payload = {
+        'type': 'command_ack',
+        'schema_version': 1,
+        'id': record.get('command_id'),
+        'status': status,
+        'occurred_at': occurred_at,
+    }
+
+    if status in ('succeeded', 'failed'):
+        journal = get_agent_command_journal()
+        payload['payload'] = response if response is not None else journal.response(record)
+        if record.get('error_code'):
+            payload['code'] = record['error_code']
+        if record.get('error_message'):
+            payload['error'] = record['error_message']
+
+    _send_json(ws, send_lock, payload)
+
+
+def _get_durable_coordinator() -> DurableCommandCoordinator:
+    global _durable_coordinator
+
+    if _durable_coordinator is not None:
+        return _durable_coordinator
+
+    with _durable_coordinator_lock:
+        if _durable_coordinator is None:
+            _durable_coordinator = DurableCommandCoordinator(
+                get_agent_command_journal(),
+                execute_agent_command,
+            )
+
+    return _durable_coordinator
+
+
+def _handle_durable_command(
+    ws,
+    send_lock: threading.Lock,
+    hub_name: str,
+    message: dict,
+) -> None:
+    command_id = str(message.get('id') or '').strip()
+
+    try:
+        _get_durable_coordinator().receive(
+            hub_name,
+            message,
+            lambda record, response: _send_command_ack(ws, send_lock, record, response),
+            lambda: _send_runtime_report(ws, send_lock),
+        )
+    except StaleAgentCommand as exc:
+        _send_json(ws, send_lock, {
+            'type': 'command_ack',
+            'schema_version': 1,
+            'id': command_id or None,
+            'status': 'failed',
+            'code': 'stale_fence',
+            'error': str(exc),
+            'payload': {'code': 'stale_fence', 'error': str(exc)},
+        })
+        return
+    except AgentCommandConflict as exc:
+        _send_json(ws, send_lock, {
+            'type': 'command_ack',
+            'schema_version': 1,
+            'id': command_id or None,
+            'status': 'failed',
+            'code': 'idempotency_conflict',
+            'error': str(exc),
+            'payload': {'code': 'idempotency_conflict', 'error': str(exc)},
+        })
+        return
+    except AgentCommandContractError as exc:
+        _send_json(ws, send_lock, {
+            'type': 'command_ack',
+            'schema_version': 1,
+            'id': command_id or None,
+            'status': 'failed',
+            'code': 'invalid_command',
+            'error': str(exc),
+            'payload': {'code': 'invalid_command', 'error': str(exc)},
+        })
+        return
+
+
+def _confirm_command_ack(hub_name: str, message: dict) -> None:
+    command_id = str(message.get('id') or '').strip()
+    status = str(message.get('status') or '').strip()
+    if not command_id or not status:
+        return
+
+    try:
+        _get_durable_coordinator().confirm(hub_name, command_id, status)
+    except AgentCommandContractError:
+        return
+
+
+def _send_pending_command_acknowledgements(
+    ws,
+    send_lock: threading.Lock,
+    hub_name: str,
+) -> None:
+    try:
+        _get_durable_coordinator().replay_pending(
+            hub_name,
+            lambda record, response: _send_command_ack(ws, send_lock, record, response),
+            lambda: _send_runtime_report(ws, send_lock),
+            limit=100,
+        )
+    except Exception as exc:
+        logging.warning(
+            '[hub-ws] Resynchronisation commandes impossible pour "%s": %s',
+            hub_name,
+            exc.__class__.__name__,
+        )
 
 
 def _send_artifact_notifications(
@@ -152,7 +292,12 @@ def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: s
     message_type = message.get('type')
 
     if message_type == 'command':
-        _handle_command(ws, send_lock, message)
+        if int(message.get('schema_version') or 1) >= 2:
+            _handle_durable_command(ws, send_lock, hub_name, message)
+        else:
+            _handle_legacy_command(ws, send_lock, message)
+    elif message_type == 'command_ack_confirmed':
+        _confirm_command_ack(hub_name, message)
     elif message_type == 'ping':
         _send_json(ws, send_lock, {'type': 'pong'})
     elif message_type == 'result_artifact_available_ack':
@@ -221,6 +366,7 @@ def _run_hub_client(hub_name: str) -> None:
             next_report_at = time.monotonic() + interval
             next_config_check_at = time.monotonic() + 5
             next_artifact_notification_at = time.monotonic()
+            next_command_ack_replay_at = time.monotonic()
 
             while not _stop_event.is_set():
                 now = time.monotonic()
@@ -248,6 +394,10 @@ def _run_hub_client(hub_name: str) -> None:
                 if now >= next_artifact_notification_at:
                     _send_artifact_notifications(ws, send_lock, hub_name, hub_cfg.get('base_url'))
                     next_artifact_notification_at = now + 2
+
+                if now >= next_command_ack_replay_at:
+                    _send_pending_command_acknowledgements(ws, send_lock, hub_name)
+                    next_command_ack_replay_at = now + 2
 
                 try:
                     raw_message = ws.recv()

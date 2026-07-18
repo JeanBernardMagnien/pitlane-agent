@@ -1,4 +1,6 @@
 import sys
+import json
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -33,6 +35,33 @@ class _PsProcess:
 
 
 class RuntimeStateIdentityTest(unittest.TestCase):
+    def test_saved_runtime_identity_includes_durable_command_id(self):
+        process = MagicMock()
+        process.pid = 1234
+        process.poll.return_value = None
+
+        with (
+            tempfile.TemporaryDirectory() as temporary_directory,
+            patch.object(runtime_state.process_supervisor, 'snapshot_running', return_value=[(
+                'server3',
+                {
+                    'process': process,
+                    'instance': {'id': 'server3'},
+                    'command_id': '4cf3a345-baa4-43af-a6f0-2f425da4a490',
+                },
+            )]),
+            patch.object(runtime_state.process_supervisor, 'snapshot_terminated', return_value=[]),
+        ):
+            path = Path(temporary_directory) / 'runtime_state.json'
+            runtime_state.save_runtime_state({'logs_path': temporary_directory})
+            payload = json.loads(path.read_text(encoding='utf-8'))
+
+        self.assertEqual(3, payload['schema_version'])
+        self.assertEqual(
+            '4cf3a345-baa4-43af-a6f0-2f425da4a490',
+            payload['running']['server3']['command_id'],
+        )
+
     def test_restoration_rejects_reused_pid_with_different_creation_time(self):
         process = _PsProcess(create_time=200.0)
 

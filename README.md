@@ -235,6 +235,7 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 | `hello` | Connexion initiale |
 | `runtime_report` | Chaque tick (`runtime_report_interval`) + après chaque commande |
 | `result_artifact_available` | Un fichier résultat stable est présent dans le spool pour ce hub |
+| `command_ack` | Progression durable `received`, `executing`, `succeeded` ou `failed` |
 
 ### Commandes reçues par l'agent
 
@@ -255,7 +256,18 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 | `steam_update_logs` | Retourne les logs SteamCMD |
 | `runtime_report` | Retourne immédiatement un rapport runtime |
 
-L'agent répond à chaque commande avec un message `command_result` portant le même `id`.
+Les commandes de schéma 2 portent un identifiant, une clé d'idempotence et un
+fence stables. L'agent les écrit d'abord dans
+`<logs_path>/agent-commands.sqlite3`, puis répond par des `command_ack`
+progressifs. Une même commande n'est jamais exécutée deux fois : son état ou sa
+réponse terminale est rejoué jusqu'à confirmation du Hub. Les mutations visant
+la même instance sont sérialisées, tandis que des instances différentes peuvent
+rester concurrentes.
+
+SQLite est fourni par la bibliothèque standard de la distribution Python
+complète utilisée par l'installateur ; aucun paquet `pip` supplémentaire n'est
+nécessaire. L'ancien `command_result` reste accepté uniquement pour la
+compatibilité avec un Hub antérieur pendant la migration.
 
 ### Pipeline de résultats
 

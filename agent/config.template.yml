@@ -77,6 +77,9 @@ auth:
 
 logging:
   logs_path: __LOGS_PATH__
+  # Journal SQLite durable des commandes Hub. Par défaut :
+  # <logs_path>/agent-commands.sqlite3
+  # command_journal_path: C:\\PitLane\\agent-commands.sqlite3
   # Par défaut : <logs_path>/result-spool. Peut être placé sur un disque dédié.
   # results_spool_path: C:\\PitLane\\result-spool
   # Seuils remontés au hub ; aucune purge automatique n'est déclenchée par ces valeurs.

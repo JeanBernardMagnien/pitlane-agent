@@ -675,6 +675,8 @@ $form.Add_Shown({
     }
 
     Add-Log "Python trouve : $($python.Source)"
+    Add-Log "Verification SQLite standard"
+    Invoke-LoggedPython -Arguments @("-c", "import sqlite3; db = sqlite3.connect(':memory:'); db.execute('SELECT 1'); db.close()")
     Set-StepStatus 4 "ok"
 
     # [6] Installation dependances

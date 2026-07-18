@@ -21,6 +21,7 @@ from services.result_pipeline import (
 )
 from services.server_manager import (
     _running,
+    already_executed_command,
     restart_instance,
     start_instance,
     stop_instance,
@@ -84,6 +85,11 @@ def _instance_id_from_payload(body: dict) -> str | None:
             return instance_id
 
     return None
+
+
+def _command_id_from_payload(body: dict) -> str | None:
+    command_id = str(body.get('_pitlane_command_id') or '').strip()
+    return command_id or None
 
 
 def prepare_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
@@ -164,6 +170,11 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     if not inst:
         return _error('instance complète requise')
 
+    command_id = _command_id_from_payload(body)
+    already_executed = already_executed_command(instance_id, command_id)
+    if already_executed is not None:
+        return already_executed, 200
+
     runtime_config = body.get('runtime_config')
     launch_id = body.get('launch_id')
     restart_if_running = bool(body.get('restart_if_running', False))
@@ -213,6 +224,7 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
                 seasondefinition_b64,
                 filename=f'launch-{launch_id or "manual"}',
                 before_start=lambda: register_result_launch(instance_id, launch_id, runtime_config),
+                command_id=command_id,
             )
         else:
             register_result_launch(instance_id, launch_id, runtime_config)
@@ -223,6 +235,7 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
                 serverconfig_b64,
                 seasondefinition_b64,
                 filename=f'launch-{launch_id or "manual"}',
+                command_id=command_id,
             )
     except Exception as e:
         return _error(f'Erreur lancement ou collecte résultats : {e}')
@@ -234,6 +247,11 @@ def start_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     inst = _instance_from_payload(body, instance_id)
     if not inst:
         return _error('instance complète requise')
+
+    command_id = _command_id_from_payload(body)
+    already_executed = already_executed_command(instance_id, command_id)
+    if already_executed is not None:
+        return already_executed, 200
 
     try:
         _, runtime_config = load_current_config(
@@ -255,6 +273,7 @@ def start_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         serverconfig_b64,
         seasondefinition_b64,
         filename='current-config',
+        command_id=command_id,
     )
 
     return result, 409 if 'error' in result else 200
@@ -278,6 +297,11 @@ def restart_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     if not inst:
         return _error('instance complète requise')
 
+    command_id = _command_id_from_payload(body)
+    already_executed = already_executed_command(instance_id, command_id)
+    if already_executed is not None:
+        return already_executed, 200
+
     try:
         _, runtime_config = load_current_config(
             config_store.GAME_CFG,
@@ -299,6 +323,7 @@ def restart_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         serverconfig_b64,
         seasondefinition_b64,
         filename='current-config',
+        command_id=command_id,
     )
 
     return result, 409 if 'error' in result else 200

@@ -56,6 +56,25 @@ def get_runtime_instances() -> list[dict]:
     return [info['instance'] for info in _running.values() if info.get('instance')]
 
 
+def already_executed_command(instance_id: str, command_id: str | None) -> dict | None:
+    if not command_id:
+        return None
+
+    info = _running.get(instance_id)
+    if (
+        not info
+        or info.get('command_id') != command_id
+        or info['process'].poll() is not None
+    ):
+        return None
+
+    return {
+        'status': 'started',
+        'pid': info['process'].pid,
+        'already_executed': True,
+    }
+
+
 def _process_identity(process, exe_path: Path) -> tuple[float | None, str]:
     try:
         ps_process = psutil.Process(process.pid)
@@ -77,7 +96,15 @@ def _observe_game_log(instance_id: str, info: dict, logging_cfg: dict | None) ->
     )
 
 
-def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=None):
+def start_instance(
+    instance_cfg,
+    game_cfg,
+    logging_cfg,
+    serverconfig_b64,
+    seasondefinition_b64,
+    filename=None,
+    command_id=None,
+):
     instance_id = instance_cfg['id']
 
     if instance_id in _running:
@@ -102,6 +129,7 @@ def start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, season
         'instance': instance_cfg,
         'started_at': time.time(),
         'config': filename,
+        'command_id': command_id,
         'config_loaded_at': now,
         'log_file': log_file,
         'log_path': log_file.name,
@@ -178,13 +206,21 @@ def stop_instance(
 def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
                      logging_cfg: dict, serverconfig_b64: str,
                      seasondefinition_b64: str, filename: str | None = None,
-                     before_start=None) -> dict:
+                     before_start=None, command_id: str | None = None) -> dict:
     """Stop + Start en conservant le filename."""
     stop_instance(instance_id, logging_cfg, reason='preempted')
     if before_start:
         before_start()
     time.sleep(2)
-    return start_instance(instance_cfg, game_cfg, logging_cfg, serverconfig_b64, seasondefinition_b64, filename=filename)
+    return start_instance(
+        instance_cfg,
+        game_cfg,
+        logging_cfg,
+        serverconfig_b64,
+        seasondefinition_b64,
+        filename=filename,
+        command_id=command_id,
+    )
 
 
 def get_last_config(instance_id: str) -> dict:

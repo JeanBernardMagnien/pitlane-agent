@@ -414,6 +414,11 @@ $form.Add_Shown({
         } else {
             Add-Log "requirements.txt absent, verification dependances ignoree"
         }
+        Add-Log "Verification SQLite standard"
+        $sqliteOut = & python -c "import sqlite3; db = sqlite3.connect(':memory:'); db.execute('SELECT 1'); db.close()" 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Le module SQLite standard de Python est indisponible : $sqliteOut"
+        }
         Set-StepStatus 5 "ok"
 
         Set-StepStatus 6 "running"
