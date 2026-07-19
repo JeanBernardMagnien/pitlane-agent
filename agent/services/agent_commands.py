@@ -13,6 +13,7 @@ from services.runtime_config_compiler import (
     InstancePortsOutOfSync,
     finalize_launch_config,
 )
+from services.runtime_bundle import RuntimeBundleError, validate_runtime_bundle
 from services.runtime_reporter import build_runtime_report
 from services.result_pipeline import (
     purge_delivered_result_artifacts,
@@ -183,10 +184,29 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         return _error('runtime_config requis')
 
     try:
+        runtime_bundle = body.get('runtime_bundle')
+        announced_bundle_hash = body.get('runtime_bundle_hash')
+        runtime_bundle_hash = None
+        if runtime_bundle is not None or announced_bundle_hash is not None:
+            runtime_bundle_hash = validate_runtime_bundle(
+                runtime_bundle,
+                announced_bundle_hash,
+                runtime_config,
+            )
+
         runtime_config = finalize_launch_config(
             runtime_config,
             inst,
             config_store.GAME_CFG,
+        )
+
+        # L'historique de tentative est immuable. Il est durablement écrit avant
+        # que la configuration courante ne bascule vers cette tentative.
+        save_launch_history_config(
+            config_store.GAME_CFG,
+            launch_id,
+            instance_id,
+            runtime_config,
         )
 
         save_current_config(
@@ -195,15 +215,13 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
             runtime_config,
         )
 
-        save_launch_history_config(
-            config_store.GAME_CFG,
-            launch_id,
-            instance_id,
-            runtime_config,
-        )
-
         serverconfig_b64, seasondefinition_b64 = encode_payload(runtime_config)
 
+    except RuntimeBundleError as e:
+        return {
+            'code': 'RUNTIME_BUNDLE_INVALID',
+            'error': str(e),
+        }, 409
     except InstancePortsOutOfSync as e:
         return {
             'code': 'INSTANCE_PORTS_OUT_OF_SYNC',
@@ -239,6 +257,9 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
             )
     except Exception as e:
         return _error(f'Erreur lancement ou collecte résultats : {e}')
+
+    if runtime_bundle_hash is not None:
+        result['runtime_bundle_hash'] = runtime_bundle_hash
 
     return result, 409 if 'error' in result else 200
 

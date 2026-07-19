@@ -1,5 +1,7 @@
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 
@@ -33,13 +35,40 @@ def history_config_path(game_cfg: dict, launch_id: str | int | None, instance_id
 
 def _write_config(path: Path, config: dict[str, Any]) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(config, ensure_ascii=False, indent=2) + '\n'
+    temporary_path: Path | None = None
 
-    path.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2) + '\n',
-        encoding='utf-8',
-    )
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=path.parent,
+            prefix=f'.{path.name}.',
+            suffix='.tmp',
+        )
+        temporary_path = Path(temporary_name)
 
-    return path
+        with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as temporary_file:
+            temporary_file.write(payload)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+
+        os.replace(temporary_path, path)
+        _sync_parent_directory(path.parent)
+
+        return path
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _sync_parent_directory(directory: Path) -> None:
+    if os.name == 'nt' or not hasattr(os, 'O_DIRECTORY'):
+        return
+
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def save_current_config(game_cfg: dict, instance_id: str, config: dict[str, Any]) -> Path:
@@ -52,7 +81,16 @@ def save_launch_history_config(
     instance_id: str,
     config: dict[str, Any],
 ) -> Path:
-    return _write_config(history_config_path(game_cfg, launch_id, instance_id), config)
+    path = history_config_path(game_cfg, launch_id, instance_id)
+    if path.exists():
+        existing = json.loads(path.read_text(encoding='utf-8'))
+        if existing != config:
+            raise ValueError(
+                f'La configuration historique du lancement {launch_id or "manual"} est immuable'
+            )
+        return path
+
+    return _write_config(path, config)
 
 
 def load_current_config(game_cfg: dict, instance_id: str) -> tuple[Path, dict[str, Any]]:
