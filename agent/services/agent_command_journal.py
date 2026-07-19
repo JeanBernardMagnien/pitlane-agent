@@ -2,9 +2,17 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from services.agent_command_maintenance import (
+    AgentCommandMaintenance,
+    DEFAULT_CLEANUP_LIMIT,
+    DEFAULT_STALE_ACK_SECONDS,
+    DEFAULT_SUCCESS_RETENTION_DAYS,
+    positive_int,
+)
 
 STATUSES = ('received', 'executing', 'succeeded', 'failed')
 TERMINAL_STATUSES = ('succeeded', 'failed')
@@ -453,9 +461,11 @@ class AgentCommandJournal:
         value = str(value or '').strip()
         return value[:max_length] if value else None
 
-
 _journal = None
 _journal_lock = threading.Lock()
+_maintenance_lock = threading.Lock()
+_last_maintenance_monotonic = 0.0
+MAINTENANCE_INTERVAL_SECONDS = 86400
 
 
 def get_agent_command_journal() -> AgentCommandJournal:
@@ -467,5 +477,70 @@ def get_agent_command_journal() -> AgentCommandJournal:
     with _journal_lock:
         if _journal is None:
             _journal = AgentCommandJournal(command_journal_path())
+            _run_command_journal_cleanup(_journal, force=True)
 
     return _journal
+
+
+def command_journal_metrics() -> dict:
+    from core import config_store
+
+    journal = get_agent_command_journal()
+    _run_command_journal_cleanup(journal)
+
+    return AgentCommandMaintenance(journal.path).metrics(
+        retention_days=positive_int(
+            config_store.LOGGING_CFG.get('command_journal_success_retention_days'),
+            DEFAULT_SUCCESS_RETENTION_DAYS,
+        ),
+        stale_ack_seconds=positive_int(
+            config_store.LOGGING_CFG.get('command_journal_stale_ack_seconds'),
+            DEFAULT_STALE_ACK_SECONDS,
+        ),
+    )
+
+
+def _run_command_journal_cleanup(
+    journal: AgentCommandJournal,
+    force: bool = False,
+) -> None:
+    global _last_maintenance_monotonic
+
+    now = time.monotonic()
+    if not force and now - _last_maintenance_monotonic < MAINTENANCE_INTERVAL_SECONDS:
+        return
+
+    with _maintenance_lock:
+        now = time.monotonic()
+        if not force and now - _last_maintenance_monotonic < MAINTENANCE_INTERVAL_SECONDS:
+            return
+
+        _last_maintenance_monotonic = now
+
+        try:
+            import logging
+            from core import config_store
+
+            summary = AgentCommandMaintenance(journal.path).purge_confirmed_successes(
+                retention_days=positive_int(
+                    config_store.LOGGING_CFG.get('command_journal_success_retention_days'),
+                    DEFAULT_SUCCESS_RETENTION_DAYS,
+                ),
+                limit=positive_int(
+                    config_store.LOGGING_CFG.get('command_journal_cleanup_limit'),
+                    DEFAULT_CLEANUP_LIMIT,
+                ),
+                execute=True,
+            )
+            if summary['processed'] > 0:
+                logging.info(
+                    '[agent-command-journal] %d succès confirmés anciens supprimés',
+                    summary['processed'],
+                )
+        except Exception as exc:
+            import logging
+
+            logging.warning(
+                '[agent-command-journal] Nettoyage conservateur impossible: %s',
+                exc,
+            )

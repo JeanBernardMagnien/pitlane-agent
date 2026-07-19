@@ -80,6 +80,11 @@ logging:
   # Journal SQLite durable des commandes Hub. Par défaut :
   # <logs_path>/agent-commands.sqlite3
   # command_journal_path: C:\\PitLane\\agent-commands.sqlite3
+  # Seuls les succès confirmés par le Hub sont supprimés automatiquement après
+  # cette durée. Les échecs et accusés encore en attente restent conservés.
+  command_journal_success_retention_days: 365
+  command_journal_cleanup_limit: 5000
+  command_journal_stale_ack_seconds: 300
   # Par défaut : <logs_path>/result-spool. Peut être placé sur un disque dédié.
   # results_spool_path: C:\\PitLane\\result-spool
   # Seuils remontés au hub ; aucune purge automatique n'est déclenchée par ces valeurs.

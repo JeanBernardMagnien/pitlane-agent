@@ -1,13 +1,17 @@
+import sqlite3
 import tempfile
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from services.agent_command_journal import (
+    AgentCommandContractError,
     AgentCommandConflict,
     AgentCommandJournal,
     StaleAgentCommand,
 )
+from services.agent_command_maintenance import AgentCommandMaintenance
 
 
 class AgentCommandJournalTest(unittest.TestCase):
@@ -103,6 +107,88 @@ class AgentCommandJournalTest(unittest.TestCase):
 
             with self.assertRaises(AgentCommandConflict):
                 journal.confirm('local', command['command_id'], 'succeeded')
+
+    def test_metrics_expose_statuses_pending_acknowledgements_and_size(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            journal = AgentCommandJournal(Path(temporary_directory) / 'commands.sqlite3')
+            succeeded, _ = journal.receive('local', self._message(fence=1))
+            journal.mark_terminal(
+                'local',
+                succeeded['command_id'],
+                'succeeded',
+                {'status': 'stopped'},
+                200,
+            )
+            journal.confirm('local', succeeded['command_id'], 'succeeded')
+
+            pending_message = self._message(fence=2)
+            pending_message['idempotency_key'] = 'stop-server3-pending'
+            pending, _ = journal.receive('local', pending_message)
+            journal.mark_terminal(
+                'local',
+                pending['command_id'],
+                'failed',
+                {'error': 'test'},
+                409,
+            )
+
+            metrics = AgentCommandMaintenance(journal.path).metrics(
+                now=datetime.now(timezone.utc),
+            )
+
+            self.assertEqual('healthy', metrics['status'])
+            self.assertEqual(2, metrics['total'])
+            self.assertEqual(1, metrics['statuses']['succeeded'])
+            self.assertEqual(1, metrics['statuses']['failed'])
+            self.assertEqual(1, metrics['pending_acknowledgements'])
+            self.assertGreater(metrics['database_bytes'], 0)
+
+    def test_cleanup_deletes_only_old_hub_confirmed_successes(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / 'commands.sqlite3'
+            journal = AgentCommandJournal(path)
+
+            succeeded, _ = journal.receive('local', self._message(fence=1))
+            journal.mark_terminal('local', succeeded['command_id'], 'succeeded', {}, 200)
+            journal.confirm('local', succeeded['command_id'], 'succeeded')
+
+            failed_message = self._message(fence=2)
+            failed_message['idempotency_key'] = 'stop-server3-failed'
+            failed, _ = journal.receive('local', failed_message)
+            journal.mark_terminal('local', failed['command_id'], 'failed', {}, 500)
+            journal.confirm('local', failed['command_id'], 'failed')
+
+            unconfirmed_message = self._message(fence=3)
+            unconfirmed_message['idempotency_key'] = 'stop-server3-unconfirmed'
+            unconfirmed, _ = journal.receive('local', unconfirmed_message)
+            journal.mark_terminal('local', unconfirmed['command_id'], 'succeeded', {}, 200)
+
+            with sqlite3.connect(path) as connection:
+                connection.execute(
+                    "UPDATE agent_command SET updated_at = '2025-01-01T00:00:00Z'"
+                )
+
+            now = datetime(2026, 7, 19, 12, 0, tzinfo=timezone.utc)
+            maintenance = AgentCommandMaintenance(journal.path)
+            dry_run = maintenance.purge_confirmed_successes(
+                retention_days=365,
+                execute=False,
+                now=now,
+            )
+            executed = maintenance.purge_confirmed_successes(
+                retention_days=365,
+                execute=True,
+                now=now,
+            )
+
+            self.assertEqual(1, dry_run['candidates'])
+            self.assertEqual(0, dry_run['processed'])
+            self.assertEqual(1, executed['candidates'])
+            self.assertEqual(1, executed['processed'])
+            with self.assertRaises(AgentCommandContractError):
+                journal.get('local', succeeded['command_id'])
+            self.assertEqual('failed', journal.get('local', failed['command_id'])['status'])
+            self.assertEqual('succeeded', journal.get('local', unconfirmed['command_id'])['status'])
 
     def _message(self, fence: int) -> dict:
         command_id = str(uuid.uuid4())

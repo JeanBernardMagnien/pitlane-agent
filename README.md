@@ -269,6 +269,15 @@ complète utilisée par l'installateur ; aucun paquet `pip` supplémentaire n'es
 nécessaire. L'ancien `command_result` reste accepté uniquement pour la
 compatibilité avec un Hub antérieur pendant la migration.
 
+Le rapport runtime inclut les compteurs et la taille de ce journal. Son
+nettoyage reste conservateur : seuls les succès dont l'accusé terminal a été
+confirmé par le Hub depuis plus de 365 jours sont supprimés automatiquement au
+démarrage du journal, puis au plus une fois par jour. Les commandes échouées,
+en cours ou encore en attente d'une confirmation ne sont jamais purgées par
+cette politique. La durée et la taille de lot peuvent être ajustées avec
+`command_journal_success_retention_days` et
+`command_journal_cleanup_limit`.
+
 ### Pipeline de résultats
 
 À chaque lancement corrélé, l'agent crée un manifeste local puis scanne le

@@ -352,9 +352,18 @@ def build_runtime_report() -> dict:
             'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
         }
 
+    try:
+        from services.agent_command_journal import command_journal_metrics
+        command_metrics = command_journal_metrics()
+    except Exception as exc:
+        command_metrics = {
+            'status': 'unknown',
+            'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
+        }
+
     return {
         'agent': {
-            'version': '0.3.3',
+            'version': '0.3.4',
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,
@@ -364,6 +373,7 @@ def build_runtime_report() -> dict:
             'ram_used_gb': round(memory.used / 1024 / 1024 / 1024, 2),
             'ram_percent': _safe_float(memory.percent),
             'result_spool': spool_usage,
+            'command_journal': command_metrics,
         },
         'instances': _running_instance_reports(),
     }
@@ -408,6 +418,7 @@ def runtime_report_signature(payload: dict) -> str:
 
     agent = payload.get('agent') if isinstance(payload, dict) else {}
     result_spool = agent.get('result_spool') if isinstance(agent, dict) else None
+    command_journal = agent.get('command_journal') if isinstance(agent, dict) else None
     comparable_spool = None
     if isinstance(result_spool, dict):
         comparable_spool = {
@@ -417,10 +428,23 @@ def runtime_report_signature(payload: dict) -> str:
             'stored_bytes': result_spool.get('stored_bytes'),
             'artifacts': result_spool.get('artifacts'),
         }
+    comparable_command_journal = None
+    if isinstance(command_journal, dict):
+        comparable_command_journal = {
+            'status': command_journal.get('status'),
+            'reasons': command_journal.get('reasons'),
+            'total': command_journal.get('total'),
+            'statuses': command_journal.get('statuses'),
+            'pending_acknowledgements': command_journal.get('pending_acknowledgements'),
+            'stale_acknowledgements': command_journal.get('stale_acknowledgements'),
+            'purgeable_succeeded': command_journal.get('purgeable_succeeded'),
+            'database_bytes': command_journal.get('database_bytes'),
+        }
 
     return json.dumps({
         'instances': comparable_instances,
         'result_spool': comparable_spool,
+        'command_journal': comparable_command_journal,
     }, sort_keys=True, separators=(',', ':'))
 
 
