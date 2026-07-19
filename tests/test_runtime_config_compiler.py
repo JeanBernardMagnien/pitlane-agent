@@ -113,13 +113,13 @@ class RuntimeConfigCompilerTest(unittest.TestCase):
             runtime_config = copy.deepcopy(self.runtime_config)
             runtime_config["Server"]["LaunchSessionId"] = 42
             runtime_config["EntryList"] = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "mode": "steamid_whitelist",
                 "authorized_count": 1,
                 "entries": [{"steam_id": "76561198000000001"}],
                 "native_payload": {
                     "entrylist": [],
-                    "steamid_whitelist": [{"steamid": "76561198000000001"}],
+                    "steamid_whitelist": ["76561198000000001"],
                     "steamid_blacklist": [],
                 },
             }

@@ -6,7 +6,7 @@ from typing import Any
 from services.atomic_json_store import write_json_atomic
 
 
-ENTRY_LIST_SCHEMA_VERSION = 1
+ENTRY_LIST_SCHEMA_VERSION = 2
 ENTRY_LIST_MODE_DISABLED = 'disabled'
 ENTRY_LIST_MODE_STEAM_ID_WHITELIST = 'steamid_whitelist'
 
@@ -97,14 +97,14 @@ def _validated_native_payload(entry_list: dict) -> dict[str, list]:
     steam_ids = []
     normalized_whitelist = []
     for item in whitelist:
-        steam_id = item.get('steamid') if isinstance(item, dict) else None
+        steam_id = item if isinstance(item, str) else None
         if not isinstance(steam_id, str) or re.fullmatch(r'\d{17}', steam_id) is None:
             raise ValueError('Entry list : SteamID invalide')
         if steam_id in steam_ids:
             raise ValueError('Entry list : SteamID dupliqué')
 
         steam_ids.append(steam_id)
-        normalized_whitelist.append({'steamid': steam_id})
+        normalized_whitelist.append(steam_id)
 
     if entry_list.get('authorized_count') != len(normalized_whitelist):
         raise ValueError('EntryList.authorized_count ne correspond pas à la whitelist')

@@ -363,7 +363,7 @@ def build_runtime_report() -> dict:
 
     return {
         'agent': {
-            'version': '0.3.6',
+            'version': '0.3.7',
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,

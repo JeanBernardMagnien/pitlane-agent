@@ -301,7 +301,7 @@ Il y a **deux mécanismes distincts** qui portent des noms proches — à ne pas
 
 **[DÉDUIT + partiellement testé]** Champs de `ServerConfiguration` (§3). D'après les commentaires trouvés dans le protobuf (*"Overwrite the current entrylist on runtime"*), ce mécanisme sert à **écraser l'entry list de la saison en cours d'exécution**, pas au chargement initial de la grille. Dans mon test, pointer `entry_list_path` vers un fichier n'a **pas** peuplé la grille de démarrage — la saison générée gardait un concurrent factice `"None"`.
 
-Ce que j'ai trouvé dans les chaînes binaires pour la **structure du fichier JSON attendu** (non testé formellement avec un vrai chargement réussi, donc à vérifier) :
+La tentative PitLane 70 a confirmé que le serveur lit bien `entry_list_path` au démarrage. Elle a aussi corrigé le format de la whitelist : le serveur refuse une liste d'objets avec `failed parsing whitlist [json.exception.type_error.302] type must be string, but is object`. Les listes SteamID attendent donc des **chaînes** :
 
 ```json
 {
@@ -310,7 +310,7 @@ Ce que j'ai trouvé dans les chaînes binaires pour la **structure du fichier JS
     { "steamid": "76561198000000002", "carmodel": "BMW M4 GT3 Evo" }
   ],
   "steamid_whitelist": [
-    { "steamid": "76561198098260744" }
+    "76561198098260744"
   ],
   "steamid_blacklist": []
 }

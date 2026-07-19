@@ -24,7 +24,7 @@ class EntryListStoreTest(unittest.TestCase):
             self.assertEqual(
                 {
                     'entrylist': [],
-                    'steamid_whitelist': [{'steamid': '76561198000000001'}],
+                    'steamid_whitelist': ['76561198000000001'],
                     'steamid_blacklist': [],
                 },
                 json.loads(path.read_text(encoding='utf-8')),
@@ -35,7 +35,7 @@ class EntryListStoreTest(unittest.TestCase):
 
             changed = self._runtime_config()
             changed['EntryList']['entries'][0]['steam_id'] = '76561198000000002'
-            changed['EntryList']['native_payload']['steamid_whitelist'][0]['steamid'] = '76561198000000002'
+            changed['EntryList']['native_payload']['steamid_whitelist'][0] = '76561198000000002'
             with self.assertRaisesRegex(ValueError, 'immuable'):
                 materialize_entry_list(changed, game_cfg, 42, 'race-1')
 
@@ -52,11 +52,26 @@ class EntryListStoreTest(unittest.TestCase):
                     'race-1',
                 )
 
+    def test_rejects_object_based_whitelist_rejected_by_ac_evo(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            config = self._runtime_config()
+            config['EntryList']['native_payload']['steamid_whitelist'] = [
+                {'steamid': '76561198000000001'},
+            ]
+
+            with self.assertRaisesRegex(ValueError, 'SteamID invalide'):
+                materialize_entry_list(
+                    config,
+                    {'configs_path': str(Path(temporary_directory) / 'configs')},
+                    42,
+                    'race-1',
+                )
+
     def test_disabled_entry_list_keeps_server_path_empty(self):
         config = {
             'Server': {'EntryListPath': 'stale.json'},
             'EntryList': {
-                'schema_version': 1,
+                'schema_version': 2,
                 'mode': 'disabled',
             },
         }
@@ -72,7 +87,7 @@ class EntryListStoreTest(unittest.TestCase):
                 'EntryListPath': '',
             },
             'EntryList': {
-                'schema_version': 1,
+                'schema_version': 2,
                 'mode': 'steamid_whitelist',
                 'authorized_count': 1,
                 'entries': [
@@ -83,9 +98,7 @@ class EntryListStoreTest(unittest.TestCase):
                 ],
                 'native_payload': {
                     'entrylist': [],
-                    'steamid_whitelist': [
-                        {'steamid': '76561198000000001'},
-                    ],
+                    'steamid_whitelist': ['76561198000000001'],
                     'steamid_blacklist': [],
                 },
             },
