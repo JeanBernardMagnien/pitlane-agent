@@ -316,6 +316,8 @@ La tentative PitLane 70 a confirmé que le serveur lit bien `entry_list_path` au
 }
 ```
 
+Après correction, le test terrain du 19 juillet 2026 confirme le contrôle d'accès : un SteamID absent reçoit `Client rejeté`, tandis qu'un SteamID présent peut rejoindre le serveur.
+
 Règles de validation vues dans les messages d'erreur du binaire :
 - `"invalid steam id in a entry"` / `"invalid 'steamid'"` → le champ `steamid` doit être une string numérique Steam64 valide.
 - `"Entrydata, need one of steam id or car, not both"` → chaque entrée whitelist/blacklist prend soit `steamid`, soit un identifiant de voiture — **pas les deux en même temps**.
