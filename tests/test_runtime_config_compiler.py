@@ -107,6 +107,39 @@ class RuntimeConfigCompilerTest(unittest.TestCase):
             self.assertTrue(expected_path.is_dir())
             self.assertEqual(str(expected_path) + os.sep, compiled["Server"]["ResultsPath"])
 
+    def test_materializes_entry_list_path_for_the_launch(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            runtime_config = copy.deepcopy(self.runtime_config)
+            runtime_config["Server"]["LaunchSessionId"] = 42
+            runtime_config["EntryList"] = {
+                "schema_version": 1,
+                "mode": "steamid_whitelist",
+                "authorized_count": 1,
+                "entries": [{"steam_id": "76561198000000001"}],
+                "native_payload": {
+                    "entrylist": [],
+                    "steamid_whitelist": [{"steamid": "76561198000000001"}],
+                    "steamid_blacklist": [],
+                },
+            }
+
+            compiled = finalize_launch_config(
+                runtime_config,
+                self.instance,
+                {
+                    "install_path": str(root / "game"),
+                    "configs_path": str(root / "configs"),
+                },
+            )
+
+            entry_list_path = Path(compiled["Server"]["EntryListPath"])
+            self.assertTrue(entry_list_path.is_file())
+            self.assertEqual(
+                root / "configs" / "entrylists" / "launch_42_instance-contract-test.json",
+                entry_list_path,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

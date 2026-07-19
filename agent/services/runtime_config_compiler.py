@@ -2,6 +2,8 @@ from copy import deepcopy
 import os
 from pathlib import Path
 
+from services.entry_list_store import materialize_entry_list
+
 
 class InstancePortsOutOfSync(ValueError):
     def __init__(self, instance_id: str, expected: dict, received: dict):
@@ -77,5 +79,12 @@ def finalize_launch_config(config: dict, instance_cfg: dict, game_cfg: dict) -> 
         results_path_value += os.sep
 
     server['ResultsPath'] = results_path_value
+
+    materialize_entry_list(
+        cfg,
+        game_cfg,
+        server.get('LaunchSessionId'),
+        str(instance_cfg['id']),
+    )
 
     return cfg

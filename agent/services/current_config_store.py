@@ -1,8 +1,8 @@
 import json
-import os
 from pathlib import Path
-import tempfile
 from typing import Any
+
+from services.atomic_json_store import write_json_atomic
 
 
 def _configs_root(game_cfg: dict) -> Path:
@@ -33,46 +33,8 @@ def history_config_path(game_cfg: dict, launch_id: str | int | None, instance_id
     return _history_dir(game_cfg) / f'launch_{safe_launch_id}_{safe_instance_id}.json'
 
 
-def _write_config(path: Path, config: dict[str, Any]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(config, ensure_ascii=False, indent=2) + '\n'
-    temporary_path: Path | None = None
-
-    try:
-        descriptor, temporary_name = tempfile.mkstemp(
-            dir=path.parent,
-            prefix=f'.{path.name}.',
-            suffix='.tmp',
-        )
-        temporary_path = Path(temporary_name)
-
-        with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as temporary_file:
-            temporary_file.write(payload)
-            temporary_file.flush()
-            os.fsync(temporary_file.fileno())
-
-        os.replace(temporary_path, path)
-        _sync_parent_directory(path.parent)
-
-        return path
-    finally:
-        if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
-
-
-def _sync_parent_directory(directory: Path) -> None:
-    if os.name == 'nt' or not hasattr(os, 'O_DIRECTORY'):
-        return
-
-    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
-
-
 def save_current_config(game_cfg: dict, instance_id: str, config: dict[str, Any]) -> Path:
-    return _write_config(current_config_path(game_cfg, instance_id), config)
+    return write_json_atomic(current_config_path(game_cfg, instance_id), config)
 
 
 def save_launch_history_config(
@@ -90,7 +52,7 @@ def save_launch_history_config(
             )
         return path
 
-    return _write_config(path, config)
+    return write_json_atomic(path, config)
 
 
 def load_current_config(game_cfg: dict, instance_id: str) -> tuple[Path, dict[str, Any]]:

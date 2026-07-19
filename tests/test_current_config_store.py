@@ -24,7 +24,7 @@ class CurrentConfigStoreTest(unittest.TestCase):
             replacement = {'Server': {'ServerName': 'replacement'}}
             save_current_config(game_cfg, 'server1', previous)
 
-            with patch('services.current_config_store.os.replace', side_effect=OSError('interrupted')):
+            with patch('services.atomic_json_store.os.replace', side_effect=OSError('interrupted')):
                 with self.assertRaisesRegex(OSError, 'interrupted'):
                     save_current_config(game_cfg, 'server1', replacement)
 

@@ -5,8 +5,8 @@ import json
 import re
 
 
-SCHEMA_VERSION = 1
-MATERIALIZED_FIELDS = [
+SCHEMA_VERSION = 2
+LEGACY_MATERIALIZED_FIELDS = [
     'Server.AdminPassword',
     'Server.DriverPassword',
     'Server.LaunchSessionId',
@@ -15,6 +15,20 @@ MATERIALIZED_FIELDS = [
     'Server.ResultsPostUrl',
     'Server.SpectatorPassword',
 ]
+MATERIALIZED_FIELDS = [
+    'Server.AdminPassword',
+    'Server.DriverPassword',
+    'Server.EntryListPath',
+    'Server.LaunchSessionId',
+    'Server.ResultCorrelationId',
+    'Server.ResultsPath',
+    'Server.ResultsPostUrl',
+    'Server.SpectatorPassword',
+]
+MATERIALIZED_FIELDS_BY_SCHEMA = {
+    1: LEGACY_MATERIALIZED_FIELDS,
+    SCHEMA_VERSION: MATERIALIZED_FIELDS,
+}
 
 
 class RuntimeBundleError(ValueError):
@@ -41,9 +55,11 @@ def validate_runtime_bundle(
 ) -> str:
     if not isinstance(bundle, dict):
         raise RuntimeBundleError('runtime_bundle requis')
-    if bundle.get('schema_version') != SCHEMA_VERSION:
+    schema_version = bundle.get('schema_version')
+    expected_materialized_fields = MATERIALIZED_FIELDS_BY_SCHEMA.get(schema_version)
+    if expected_materialized_fields is None:
         raise RuntimeBundleError('Version de bundle runtime non supportée')
-    if bundle.get('materialized_fields') != MATERIALIZED_FIELDS:
+    if bundle.get('materialized_fields') != expected_materialized_fields:
         raise RuntimeBundleError('Liste des champs matérialisés du bundle invalide')
 
     canonical_config = bundle.get('runtime_config')
@@ -61,7 +77,7 @@ def validate_runtime_bundle(
         raise RuntimeBundleError('L’empreinte du bundle runtime ne correspond pas à son contenu')
 
     redacted_config = deepcopy(materialized_config)
-    for path in MATERIALIZED_FIELDS:
+    for path in expected_materialized_fields:
         _copy_path_value(canonical_config, redacted_config, path.split('.'))
 
     if redacted_config != canonical_config:
