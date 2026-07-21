@@ -18,6 +18,11 @@ if (-not (Test-Path $serviceScript)) {
 Write-Host "Installation des dependances Python..."
 python -m pip install -r (Join-Path $AgentPath "requirements.txt")
 python -m pip install pywin32
+Write-Host "Verification SQLite standard..."
+python -c "import sqlite3; db = sqlite3.connect(':memory:'); db.execute('SELECT 1'); db.close()"
+if ($LASTEXITCODE -ne 0) {
+    throw "Le module SQLite standard de Python est indisponible."
+}
 
 Write-Host "Suppression de l'ancienne tache planifiee si elle existe..."
 Stop-ScheduledTask -TaskName "PitLaneAgent" -ErrorAction SilentlyContinue

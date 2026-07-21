@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 import psutil
 
 from core import config_store
-from services.server_manager import _running
+from services.player_count_observer import observe_player_count, resolve_player_count
+from services.process_supervisor import process_supervisor
+from services.server_manager import terminal_process_payload
 
 
 DEFAULT_REPORT_INTERVAL_SECONDS = 1
@@ -174,8 +176,8 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
         clients = data.get('clients')
 
         return {
-            'connected_drivers': int(clients) if isinstance(clients, int) else None,
-            'drivers_seen_at': _utc_now() if isinstance(clients, int) else None,
+            'http_connected_drivers': int(clients) if isinstance(clients, int) else None,
+            'http_drivers_seen_at': _utc_now() if isinstance(clients, int) else None,
             'http_ok': True,
             'http_checked_at': _utc_now(),
             'http_duration_ms': duration_ms,
@@ -184,8 +186,8 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
     except Exception as exc:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return {
-            'connected_drivers': None,
-            'drivers_seen_at': None,
+            'http_connected_drivers': None,
+            'http_drivers_seen_at': None,
             'http_ok': False,
             'http_checked_at': _utc_now(),
             'http_duration_ms': duration_ms,
@@ -229,15 +231,28 @@ def _process_cpu_percent(pid: int, process: psutil.Process) -> float | None:
 def _running_instance_reports() -> list[dict]:
     reports = []
     timeout = _http_timeout()
+    process_exit_observed = False
 
-    for instance_id, info in list(_running.items()):
+    for instance_id, info in process_supervisor.snapshot_running():
         proc = info.get('process')
         instance = info.get('instance') or {}
 
         if not proc:
             continue
 
+        log_observation = observe_player_count(
+            instance_id,
+            info,
+            config_store.LOGGING_CFG['logs_path'],
+        )
+        info['game_observation'] = log_observation
+
         poll = proc.poll()
+        if poll is not None:
+            process_supervisor.observe_exit(instance_id)
+            process_exit_observed = True
+            continue
+
         status = 'running' if poll is None else 'stopped'
         pid = proc.pid if poll is None else None
         started_at = None
@@ -273,12 +288,54 @@ def _running_instance_reports() -> list[dict]:
         }
 
         http_port = instance.get('http_port')
-        if status == 'running' and http_port:
-            report.update(_read_connected_drivers(int(http_port), timeout))
+        if status == 'running':
+            http_observation = _read_connected_drivers(int(http_port), timeout) if http_port else {
+                'http_connected_drivers': None,
+                'http_drivers_seen_at': None,
+                'http_ok': None,
+                'http_checked_at': None,
+                'http_duration_ms': None,
+                'http_error': None,
+            }
+            process_identity = f"{pid or ''}:{info.get('started_at') or ''}"
+            report.update(resolve_player_count(instance_id, process_identity, http_observation, log_observation))
+            report.update(_game_observation_payload(log_observation))
 
         reports.append(report)
 
+    if process_exit_observed:
+        try:
+            from services.runtime_state import save_runtime_state
+            save_runtime_state(config_store.LOGGING_CFG)
+        except Exception as exc:
+            logging.warning('[runtime-state] Impossible de persister une sortie process: %s', exc)
+
+    for instance_id, terminal in process_supervisor.snapshot_terminated():
+        instance = terminal.get('instance') or {}
+        reports.append({
+            'id': instance_id,
+            'status': 'stopped',
+            'pid': None,
+            'started_at': None,
+            'uptime_seconds': None,
+            'cpu_percent': None,
+            'ram_mb': None,
+            **terminal_process_payload(terminal),
+        })
+
     return reports
+
+
+def _game_observation_payload(observation: dict) -> dict:
+    return {
+        'session_phase': observation.get('session_phase'),
+        'session_observed_at': observation.get('session_observed_at'),
+        'sport_started_at': observation.get('sport_started_at'),
+        'race_started_at': observation.get('race_started_at'),
+        'first_driver_seen_at': observation.get('first_driver_seen_at'),
+        'log_observed_from_start': bool(observation.get('log_observed_from_start')),
+        'crash_detected_at': observation.get('crash_detected_at'),
+    }
 
 
 def build_runtime_report() -> dict:
@@ -286,9 +343,27 @@ def build_runtime_report() -> dict:
     cpu_cores = psutil.cpu_count(logical=False) or 1
     cpu_threads = psutil.cpu_count(logical=True) or cpu_cores
 
+    try:
+        from services.result_pipeline import result_spool_usage
+        spool_usage = result_spool_usage()
+    except Exception as exc:
+        spool_usage = {
+            'status': 'unknown',
+            'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
+        }
+
+    try:
+        from services.agent_command_journal import command_journal_metrics
+        command_metrics = command_journal_metrics()
+    except Exception as exc:
+        command_metrics = {
+            'status': 'unknown',
+            'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
+        }
+
     return {
         'agent': {
-            'version': '0.2.0',
+            'version': '0.3.7',
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,
@@ -297,6 +372,8 @@ def build_runtime_report() -> dict:
             'ram_total_gb': round(memory.total / 1024 / 1024 / 1024, 2),
             'ram_used_gb': round(memory.used / 1024 / 1024 / 1024, 2),
             'ram_percent': _safe_float(memory.percent),
+            'result_spool': spool_usage,
+            'command_journal': command_metrics,
         },
         'instances': _running_instance_reports(),
     }
@@ -317,14 +394,57 @@ def runtime_report_signature(payload: dict) -> str:
                 'pid': item.get('pid'),
                 'started_at': item.get('started_at'),
                 'connected_drivers': item.get('connected_drivers'),
+                'drivers_source': item.get('drivers_source'),
+                'drivers_conflict': item.get('drivers_conflict'),
+                'drivers_zero_confirmed': item.get('drivers_zero_confirmed'),
+                'log_connected_drivers': item.get('log_connected_drivers'),
+                'http_connected_drivers': item.get('http_connected_drivers'),
                 'http_ok': item.get('http_ok'),
                 'http_error': item.get('http_error'),
+                'session_phase': item.get('session_phase'),
+                'session_observed_at': item.get('session_observed_at'),
+                'sport_started_at': item.get('sport_started_at'),
+                'race_started_at': item.get('race_started_at'),
+                'first_driver_seen_at': item.get('first_driver_seen_at'),
+                'log_observed_from_start': item.get('log_observed_from_start'),
+                'exit_code': item.get('exit_code'),
+                'exit_observed_at': item.get('exit_observed_at'),
+                'stop_requested_at': item.get('stop_requested_at'),
+                'stop_reason': item.get('stop_reason'),
+                'crash_detected_at': item.get('crash_detected_at'),
             })
 
     comparable_instances.sort(key=lambda item: item['id'])
 
+    agent = payload.get('agent') if isinstance(payload, dict) else {}
+    result_spool = agent.get('result_spool') if isinstance(agent, dict) else None
+    command_journal = agent.get('command_journal') if isinstance(agent, dict) else None
+    comparable_spool = None
+    if isinstance(result_spool, dict):
+        comparable_spool = {
+            'status': result_spool.get('status'),
+            'reasons': result_spool.get('reasons'),
+            'file_count': result_spool.get('file_count'),
+            'stored_bytes': result_spool.get('stored_bytes'),
+            'artifacts': result_spool.get('artifacts'),
+        }
+    comparable_command_journal = None
+    if isinstance(command_journal, dict):
+        comparable_command_journal = {
+            'status': command_journal.get('status'),
+            'reasons': command_journal.get('reasons'),
+            'total': command_journal.get('total'),
+            'statuses': command_journal.get('statuses'),
+            'pending_acknowledgements': command_journal.get('pending_acknowledgements'),
+            'stale_acknowledgements': command_journal.get('stale_acknowledgements'),
+            'purgeable_succeeded': command_journal.get('purgeable_succeeded'),
+            'database_bytes': command_journal.get('database_bytes'),
+        }
+
     return json.dumps({
         'instances': comparable_instances,
+        'result_spool': comparable_spool,
+        'command_journal': comparable_command_journal,
     }, sort_keys=True, separators=(',', ':'))
 
 

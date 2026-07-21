@@ -140,6 +140,9 @@ game:
   executable_name: AssettoCorsaEVOServer.exe
   configs_path: C:\ACEVOServer\configs
   results_path: C:\ACEVOServer\results
+  result_scan_interval: 1.0
+  result_stable_scans: 2
+  result_upload_timeout: 10.0
 
 steam:
   steamcmd_path: C:\SteamCMD\steamcmd.exe
@@ -165,6 +168,9 @@ auth:
 
 logging:
   logs_path: C:\ACEVOServer\logs
+  # results_spool_path: C:\ACEVOServer\logs\result-spool
+  results_spool_max_bytes: 1073741824
+  results_spool_minimum_free_bytes: 5368709120
   max_lines: 500
 ```
 
@@ -228,6 +234,8 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 |---|---|
 | `hello` | Connexion initiale |
 | `runtime_report` | Chaque tick (`runtime_report_interval`) + après chaque commande |
+| `result_artifact_available` | Un fichier résultat stable est présent dans le spool pour ce hub |
+| `command_ack` | Progression durable `received`, `executing`, `succeeded` ou `failed` |
 
 ### Commandes reçues par l'agent
 
@@ -241,12 +249,60 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 | `stop_instance` | Arrête le processus |
 | `restart_instance` | Redémarre avec une config runtime fournie |
 | `get_instance_logs` | Retourne les dernières lignes de log |
+| `resync_result_artifacts` | Rescanne les fichiers d'une tentative et remet ses artefacts en file |
+| `purge_result_artifacts` | Dry-run ou purge une liste explicitement autorisée de Practice/WarmUp déjà livrés |
 | `steam_update_check` | Compare le build local et le build distant |
 | `steam_update` | Lance la mise à jour via SteamCMD |
 | `steam_update_logs` | Retourne les logs SteamCMD |
 | `runtime_report` | Retourne immédiatement un rapport runtime |
 
-L'agent répond à chaque commande avec un message `command_result` portant le même `id`.
+Les commandes de schéma 2 portent un identifiant, une clé d'idempotence et un
+fence stables. L'agent les écrit d'abord dans
+`<logs_path>/agent-commands.sqlite3`, puis répond par des `command_ack`
+progressifs. Une même commande n'est jamais exécutée deux fois : son état ou sa
+réponse terminale est rejoué jusqu'à confirmation du Hub. Les mutations visant
+la même instance sont sérialisées, tandis que des instances différentes peuvent
+rester concurrentes.
+
+SQLite est fourni par la bibliothèque standard de la distribution Python
+complète utilisée par l'installateur ; aucun paquet `pip` supplémentaire n'est
+nécessaire. L'ancien `command_result` reste accepté uniquement pour la
+compatibilité avec un Hub antérieur pendant la migration.
+
+Le rapport runtime inclut les compteurs et la taille de ce journal. Son
+nettoyage reste conservateur : seuls les succès dont l'accusé terminal a été
+confirmé par le Hub depuis plus de 365 jours sont supprimés automatiquement au
+démarrage du journal, puis au plus une fois par jour. Les commandes échouées,
+en cours ou encore en attente d'une confirmation ne sont jamais purgées par
+cette politique. La durée et la taille de lot peuvent être ajustées avec
+`command_journal_success_retention_days` et
+`command_journal_cleanup_limit`.
+
+### Pipeline de résultats
+
+À chaque lancement corrélé, l'agent crée un manifeste local puis scanne le
+`ResultsPath` isolé par instance et par `ResultCorrelationId`. Un fichier doit être inchangé pendant deux
+scans et contenir un objet JSON valide avant d'être copié atomiquement dans le
+spool. La copie porte une identité déterministe et un SHA-256, puis est envoyée
+par HTTP vers le `ResultsPostUrl` signé fourni par le hub. En cas d'échec, le
+spool reste sur disque et l'upload reprend avec un délai exponentiel, y compris
+après redémarrage de l'agent. Les Quick Sessions et lancements techniques gardent
+le répertoire local de l'instance mais ferment toute fenêtre collectée précédente.
+
+Le rapport runtime expose le volume du spool, son nombre de fichiers, les
+statuts d'artefacts et l'espace disque libre. Les seuils configurés produisent
+un état `healthy`, `warning` ou `critical`, mais ne déclenchent aucune suppression
+automatique. La commande `purge_result_artifacts` reste en dry-run sans
+`execute: true` et n'accepte qu'une liste explicite d'artefacts déjà `delivered`
+de type Practice/WarmUp. Qualification, Race, pending et les artefacts non
+autorisés restent protégés ; le hub ne doit envoyer cette autorisation qu'après
+la clôture sportive sans incident.
+
+Le scan périodique est volontairement la seule source de découverte en V1 : il
+n'ajoute aucune dépendance Windows et ne peut pas perdre une notification
+filesystem. Avec plusieurs hubs configurés, le signal WebSocket est envoyé
+uniquement au hub dont l'origine correspond au `ResultsPostUrl`; l'URL signée
+elle-même n'est jamais incluse dans la notification ou l'inventaire.
 
 Le push HTTP `runtime_report_endpoint` n'est utilisé que si `websocket_enabled: false` est explicitement configuré sur un hub (fallback).
 
@@ -286,6 +342,7 @@ Le hub fournit l'instance complète dans le payload.
 | POST | `/api/instances/{id}/start` | Démarre avec la dernière config runtime en mémoire |
 | POST | `/api/instances/{id}/stop` | Arrête l'instance |
 | POST | `/api/instances/{id}/restart` | Redémarre avec une config runtime fournie |
+| POST | `/api/instances/{id}/results/resync` | Rescanne et remet en file les résultats de la tentative demandée |
 | GET | `/api/instances/{id}/logs` | Dernières lignes de log |
 | WS | `/api/instances/{id}/logs/stream` | Streaming live des logs |
 
@@ -313,6 +370,7 @@ Le hub fournit l'instance complète dans le payload.
 ```text
 logs/
 ├── log_<instance_id>_YYYY-MM-DD_HH-MM-SS.log   # log par instance
+├── result-spool/                                # manifests et copies résultat persistantes
 └── steam_update.log                              # log SteamCMD
 ```
 

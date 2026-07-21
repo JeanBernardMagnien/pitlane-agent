@@ -301,7 +301,7 @@ Il y a **deux mécanismes distincts** qui portent des noms proches — à ne pas
 
 **[DÉDUIT + partiellement testé]** Champs de `ServerConfiguration` (§3). D'après les commentaires trouvés dans le protobuf (*"Overwrite the current entrylist on runtime"*), ce mécanisme sert à **écraser l'entry list de la saison en cours d'exécution**, pas au chargement initial de la grille. Dans mon test, pointer `entry_list_path` vers un fichier n'a **pas** peuplé la grille de démarrage — la saison générée gardait un concurrent factice `"None"`.
 
-Ce que j'ai trouvé dans les chaînes binaires pour la **structure du fichier JSON attendu** (non testé formellement avec un vrai chargement réussi, donc à vérifier) :
+La tentative PitLane 70 a confirmé que le serveur lit bien `entry_list_path` au démarrage. Elle a aussi corrigé le format de la whitelist : le serveur refuse une liste d'objets avec `failed parsing whitlist [json.exception.type_error.302] type must be string, but is object`. Les listes SteamID attendent donc des **chaînes** :
 
 ```json
 {
@@ -310,11 +310,13 @@ Ce que j'ai trouvé dans les chaînes binaires pour la **structure du fichier JS
     { "steamid": "76561198000000002", "carmodel": "BMW M4 GT3 Evo" }
   ],
   "steamid_whitelist": [
-    { "steamid": "76561198098260744" }
+    "76561198098260744"
   ],
   "steamid_blacklist": []
 }
 ```
+
+Après correction, le test terrain du 19 juillet 2026 confirme le contrôle d'accès : un SteamID absent reçoit `Client rejeté`, tandis qu'un SteamID présent peut rejoindre le serveur.
 
 Règles de validation vues dans les messages d'erreur du binaire :
 - `"invalid steam id in a entry"` / `"invalid 'steamid'"` → le champ `steamid` doit être une string numérique Steam64 valide.
@@ -499,6 +501,21 @@ Pense à `-no_lobby` pendant tes tests pour ne pas polluer la liste des serveurs
 | Arrêts aux stands obligatoires | 🟡 Existe dans le moteur (protobuf), mais **pas exposé** via seasonjson ni la GUI actuellement — §6 |
 | `results_post_url` qui ne marche pas | 🟡 Mécanisme confirmé fonctionnel dans le code (logs de succès/erreur existent) — cause probable = réseau/URL/timing, méthode de debug fournie §7.1 |
 | Comment savoir qu'un event est fini / récupérer les résultats | 🟡 3 pistes documentées §7.3, recommandation = `results_path` + `-write_server_results` + watcher de fichier |
+
+---
+
+### 10.1 Marqueurs de session confirmés sur AC EVO 0.8.0
+
+Un cycle réel Practice → Qualification → WarmUp → Race capturé le 16 juillet 2026 confirme que les anciens motifs hypothétiques `START_SESSION`/`BEGIN_SESSION` ne sont pas émis.
+
+- `TimeAttackRemote Practice created`, `TimeAttackRemote Qualifying created`, `TimeAttackRemote Warmup created` et `InstantRaceRemote Race created` identifient le mode courant. La création ne prouve pas encore que le chrono ou la Course a commencé.
+- Pour Practice, Qualification et WarmUp, `Outplap split` coïncide avec le démarrage effectif du chrono après l'entrée en piste.
+- Pour la Course, `setSessionPhase Waiting_For_Players` reste une attente ; `setSessionPhase Session` marque le départ compétitif.
+- `END_SESSION` est générique et souvent répété pour tous les types de session ; il ne permet ni d'identifier une Course ni de conclure seul une fin sportive. Pour la Course, `setSessionPhase Ended` est plus spécifique, mais le résultat compétitif retenu reste l'autorité métier.
+- La connexion d'un pilote et la création de sa voiture précèdent ces marqueurs et ne prouvent pas une consommation sportive.
+- En V1 PitLane, Qualification et Race sont compétitives ; Practice et WarmUp restent des étapes techniques. Le parseur conserve donc la phase courante pour les quatre types, mais ne renseigne `sport_started_at` que pour une Qualification réellement lancée ou une Course passée en phase `Session`.
+
+AC EVO peut recycler son programme lorsque le serveur redevient vide sans arrêter son processus. Ce recyclage reste dans la même tentative PitLane ; seule l'apparition de plusieurs résultats compétitifs éligibles crée une ambiguïté métier.
 
 ---
 

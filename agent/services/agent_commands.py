@@ -13,9 +13,16 @@ from services.runtime_config_compiler import (
     InstancePortsOutOfSync,
     finalize_launch_config,
 )
+from services.runtime_bundle import RuntimeBundleError, validate_runtime_bundle
 from services.runtime_reporter import build_runtime_report
+from services.result_pipeline import (
+    purge_delivered_result_artifacts,
+    register_result_launch,
+    resync_result_artifacts,
+)
 from services.server_manager import (
     _running,
+    already_executed_command,
     restart_instance,
     start_instance,
     stop_instance,
@@ -79,6 +86,11 @@ def _instance_id_from_payload(body: dict) -> str | None:
             return instance_id
 
     return None
+
+
+def _command_id_from_payload(body: dict) -> str | None:
+    command_id = str(body.get('_pitlane_command_id') or '').strip()
+    return command_id or None
 
 
 def prepare_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
@@ -159,6 +171,11 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     if not inst:
         return _error('instance complète requise')
 
+    command_id = _command_id_from_payload(body)
+    already_executed = already_executed_command(instance_id, command_id)
+    if already_executed is not None:
+        return already_executed, 200
+
     runtime_config = body.get('runtime_config')
     launch_id = body.get('launch_id')
     restart_if_running = bool(body.get('restart_if_running', False))
@@ -167,10 +184,29 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         return _error('runtime_config requis')
 
     try:
+        runtime_bundle = body.get('runtime_bundle')
+        announced_bundle_hash = body.get('runtime_bundle_hash')
+        runtime_bundle_hash = None
+        if runtime_bundle is not None or announced_bundle_hash is not None:
+            runtime_bundle_hash = validate_runtime_bundle(
+                runtime_bundle,
+                announced_bundle_hash,
+                runtime_config,
+            )
+
         runtime_config = finalize_launch_config(
             runtime_config,
             inst,
             config_store.GAME_CFG,
+        )
+
+        # L'historique de tentative est immuable. Il est durablement écrit avant
+        # que la configuration courante ne bascule vers cette tentative.
+        save_launch_history_config(
+            config_store.GAME_CFG,
+            launch_id,
+            instance_id,
+            runtime_config,
         )
 
         save_current_config(
@@ -179,15 +215,13 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
             runtime_config,
         )
 
-        save_launch_history_config(
-            config_store.GAME_CFG,
-            launch_id,
-            instance_id,
-            runtime_config,
-        )
-
         serverconfig_b64, seasondefinition_b64 = encode_payload(runtime_config)
 
+    except RuntimeBundleError as e:
+        return {
+            'code': 'RUNTIME_BUNDLE_INVALID',
+            'error': str(e),
+        }, 409
     except InstancePortsOutOfSync as e:
         return {
             'code': 'INSTANCE_PORTS_OUT_OF_SYNC',
@@ -197,25 +231,35 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     except Exception as e:
         return _error(f'Erreur préparation lancement : {e}')
 
-    if restart_if_running:
-        result = restart_instance(
-            instance_id,
-            inst,
-            config_store.GAME_CFG,
-            config_store.LOGGING_CFG,
-            serverconfig_b64,
-            seasondefinition_b64,
-            filename=f'launch-{launch_id or "manual"}',
-        )
-    else:
-        result = start_instance(
-            inst,
-            config_store.GAME_CFG,
-            config_store.LOGGING_CFG,
-            serverconfig_b64,
-            seasondefinition_b64,
-            filename=f'launch-{launch_id or "manual"}',
-        )
+    try:
+        if restart_if_running:
+            result = restart_instance(
+                instance_id,
+                inst,
+                config_store.GAME_CFG,
+                config_store.LOGGING_CFG,
+                serverconfig_b64,
+                seasondefinition_b64,
+                filename=f'launch-{launch_id or "manual"}',
+                before_start=lambda: register_result_launch(instance_id, launch_id, runtime_config),
+                command_id=command_id,
+            )
+        else:
+            register_result_launch(instance_id, launch_id, runtime_config)
+            result = start_instance(
+                inst,
+                config_store.GAME_CFG,
+                config_store.LOGGING_CFG,
+                serverconfig_b64,
+                seasondefinition_b64,
+                filename=f'launch-{launch_id or "manual"}',
+                command_id=command_id,
+            )
+    except Exception as e:
+        return _error(f'Erreur lancement ou collecte résultats : {e}')
+
+    if runtime_bundle_hash is not None:
+        result['runtime_bundle_hash'] = runtime_bundle_hash
 
     return result, 409 if 'error' in result else 200
 
@@ -224,6 +268,11 @@ def start_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
     inst = _instance_from_payload(body, instance_id)
     if not inst:
         return _error('instance complète requise')
+
+    command_id = _command_id_from_payload(body)
+    already_executed = already_executed_command(instance_id, command_id)
+    if already_executed is not None:
+        return already_executed, 200
 
     try:
         _, runtime_config = load_current_config(
@@ -245,13 +294,17 @@ def start_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         serverconfig_b64,
         seasondefinition_b64,
         filename='current-config',
+        command_id=command_id,
     )
 
     return result, 409 if 'error' in result else 200
 
 
 def stop_instance_command(instance_id: str, body: dict | None = None) -> tuple[dict, int]:
-    result = stop_instance(instance_id, config_store.LOGGING_CFG)
+    body = body or {}
+    requested_reason = str(body.get('stop_reason') or 'manual_stop').strip()
+    stop_reason = requested_reason if requested_reason in {'manual_stop', 'normal', 'preempted'} else 'manual_stop'
+    result = stop_instance(instance_id, config_store.LOGGING_CFG, reason=stop_reason)
     return result, 409 if 'error' in result else 200
 
 
@@ -264,6 +317,11 @@ def restart_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
 
     if not inst:
         return _error('instance complète requise')
+
+    command_id = _command_id_from_payload(body)
+    already_executed = already_executed_command(instance_id, command_id)
+    if already_executed is not None:
+        return already_executed, 200
 
     try:
         _, runtime_config = load_current_config(
@@ -286,6 +344,7 @@ def restart_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         serverconfig_b64,
         seasondefinition_b64,
         filename='current-config',
+        command_id=command_id,
     )
 
     return result, 409 if 'error' in result else 200
@@ -301,6 +360,34 @@ def get_instance_logs_command(instance_id: str, body: dict | None = None) -> tup
 
     lines = log_files[0].read_text(encoding='utf-8', errors='replace').splitlines()
     return {'lines': lines[-max_lines:]}, 200
+
+
+def resync_results_command(instance_id: str, body: dict | None = None) -> tuple[dict, int]:
+    body = body or {}
+    launch_id = body.get('launch_id')
+    result_correlation_id = str(body.get('result_correlation_id') or '').strip() or None
+    try:
+        normalized_launch_id = int(launch_id) if launch_id not in (None, '') else None
+    except (TypeError, ValueError):
+        return _error('launch_id invalide')
+
+    return resync_result_artifacts(instance_id, normalized_launch_id, result_correlation_id), 200
+
+
+def purge_results_command(instance_id: str, body: dict | None = None) -> tuple[dict, int]:
+    body = body or {}
+    artifact_ids = body.get('artifact_ids')
+    if not isinstance(artifact_ids, list) or not all(isinstance(value, str) for value in artifact_ids):
+        return _error('artifact_ids doit être une liste de chaînes')
+
+    try:
+        return purge_delivered_result_artifacts(
+            artifact_ids,
+            instance_id=instance_id,
+            execute=body.get('execute') is True,
+        ), 200
+    except ValueError as exc:
+        return _error(str(exc))
 
 
 COMMANDS = {
@@ -323,6 +410,9 @@ COMMANDS = {
     'instance_logs': get_instance_logs_command,
     'get_logs': get_instance_logs_command,
     'logs': get_instance_logs_command,
+    'resync_result_artifacts': resync_results_command,
+    'resync_results': resync_results_command,
+    'purge_result_artifacts': purge_results_command,
 }
 
 

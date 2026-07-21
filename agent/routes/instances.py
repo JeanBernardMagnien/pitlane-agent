@@ -5,6 +5,7 @@ from services.agent_commands import (
     cleanup_instance_command,
     launch_instance_command,
     prepare_instance_command,
+    resync_results_command,
     restart_instance_command,
     start_instance_command,
     stop_instance_command,
@@ -59,3 +60,9 @@ def register_instance_routes(app):
         require_jwt()
         body = request.get_json(silent=True) or {}
         return _json_response(restart_instance_command(instance_id, body))
+
+    @app.route('/api/instances/<instance_id>/results/resync', methods=['POST'])
+    def instance_results_resync(instance_id):
+        require_jwt()
+        body = request.get_json(silent=True) or {}
+        return _json_response(resync_results_command(instance_id, body))

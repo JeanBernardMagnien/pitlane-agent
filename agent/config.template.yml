@@ -13,6 +13,31 @@ game:
   configs_path: __CONFIGS_PATH__
   results_path: __RESULTS_PATH__
 
+  # Passe -no_lobby au lancement : le serveur ne s'enregistre pas dans le
+  # lobby public Kunos, ce qui evite le "Backend controlled shutdown" que
+  # Kunos declenche si le port UDP n'est pas joignable publiquement (LAN,
+  # dev local, serveur derriere un NAT sans port forwarding UDP correct).
+  # A laisser a false/absent pour un vrai serveur dedie public.
+  no_lobby: false
+
+  # Passe -log_debug="<valeur>" au lancement (ex: "server,network") pour des
+  # logs plus detailles cote AC EVO. Ne change pas le comportement du
+  # serveur, augmente juste la verbosite : safe a activer en prod pour
+  # deboguer (ex: results_post_url qui ne se declenche pas). Laisser
+  # vide/absent pour les logs par defaut.
+  log_debug: ""
+
+  # Passe -write_server_results au lancement. Les tests AC EVO 0.8.0 montrent
+  # que results_path et results_post_url fonctionnent aussi sans ce flag ; il
+  # reste donc optionnel et desactive par defaut.
+  write_server_results: false
+
+  # Pipeline de résultats local : scan périodique sans dépendance native,
+  # validation de stabilité puis upload HTTP idempotent avec reprise.
+  result_scan_interval: 1.0
+  result_stable_scans: 2
+  result_upload_timeout: 10.0
+
 steam:
   steamcmd_path: __STEAMCMD_PATH__
   app_id: 4564210
@@ -52,4 +77,17 @@ auth:
 
 logging:
   logs_path: __LOGS_PATH__
+  # Journal SQLite durable des commandes Hub. Par défaut :
+  # <logs_path>/agent-commands.sqlite3
+  # command_journal_path: C:\\PitLane\\agent-commands.sqlite3
+  # Seuls les succès confirmés par le Hub sont supprimés automatiquement après
+  # cette durée. Les échecs et accusés encore en attente restent conservés.
+  command_journal_success_retention_days: 365
+  command_journal_cleanup_limit: 5000
+  command_journal_stale_ack_seconds: 300
+  # Par défaut : <logs_path>/result-spool. Peut être placé sur un disque dédié.
+  # results_spool_path: C:\\PitLane\\result-spool
+  # Seuils remontés au hub ; aucune purge automatique n'est déclenchée par ces valeurs.
+  results_spool_max_bytes: 1073741824
+  results_spool_minimum_free_bytes: 5368709120
   max_lines: 500

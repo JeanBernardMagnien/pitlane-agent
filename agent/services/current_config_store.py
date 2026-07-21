@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from services.atomic_json_store import write_json_atomic
+
 
 def _configs_root(game_cfg: dict) -> Path:
     return Path(game_cfg['configs_path'])
@@ -31,19 +33,8 @@ def history_config_path(game_cfg: dict, launch_id: str | int | None, instance_id
     return _history_dir(game_cfg) / f'launch_{safe_launch_id}_{safe_instance_id}.json'
 
 
-def _write_config(path: Path, config: dict[str, Any]) -> Path:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    path.write_text(
-        json.dumps(config, ensure_ascii=False, indent=2) + '\n',
-        encoding='utf-8',
-    )
-
-    return path
-
-
 def save_current_config(game_cfg: dict, instance_id: str, config: dict[str, Any]) -> Path:
-    return _write_config(current_config_path(game_cfg, instance_id), config)
+    return write_json_atomic(current_config_path(game_cfg, instance_id), config)
 
 
 def save_launch_history_config(
@@ -52,7 +43,16 @@ def save_launch_history_config(
     instance_id: str,
     config: dict[str, Any],
 ) -> Path:
-    return _write_config(history_config_path(game_cfg, launch_id, instance_id), config)
+    path = history_config_path(game_cfg, launch_id, instance_id)
+    if path.exists():
+        existing = json.loads(path.read_text(encoding='utf-8'))
+        if existing != config:
+            raise ValueError(
+                f'La configuration historique du lancement {launch_id or "manual"} est immuable'
+            )
+        return path
+
+    return write_json_atomic(path, config)
 
 
 def load_current_config(game_cfg: dict, instance_id: str) -> tuple[Path, dict[str, Any]]:

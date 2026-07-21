@@ -183,10 +183,20 @@ Le script ne supprime jamais SteamCMD, AC EVO ou les dependances Python sans opt
 
 ## Note release
 
-Le workflow GitHub Release zippe uniquement le dossier :
+Le workflow GitHub Release place directement le contenu de ce dossier à la
+racine de `agent.zip` :
 
 ```txt
 agent/
 ```
 
-Donc ce script n'est pas inclus dans `agent.zip`.
+L'archive ne doit pas contenir un niveau `agent/` supplémentaire, puisque les
+scripts d'installation et le service Windows exécutent directement
+`<destination>/service.py`. Pour produire manuellement le même format depuis la
+racine du dépôt :
+
+```bash
+git archive --format=zip --output=agent.zip HEAD:agent
+```
+
+Le dossier `tools/` n'est donc pas inclus dans `agent.zip`.

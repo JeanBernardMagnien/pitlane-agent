@@ -2,6 +2,8 @@ from copy import deepcopy
 import os
 from pathlib import Path
 
+from services.entry_list_store import materialize_entry_list
+
 
 class InstancePortsOutOfSync(ValueError):
     def __init__(self, instance_id: str, expected: dict, received: dict):
@@ -63,6 +65,13 @@ def finalize_launch_config(config: dict, instance_cfg: dict, game_cfg: dict) -> 
     configured_results_path = game_cfg.get('results_path')
     results_root = Path(configured_results_path) if configured_results_path else install_path / 'Results'
     results_path = results_root / str(instance_cfg['id'])
+
+    correlation_id = str(server.get('ResultCorrelationId') or '').strip().lower()
+    if server.get('CollectResults') is not False and correlation_id:
+        if len(correlation_id) != 32 or any(character not in '0123456789abcdef' for character in correlation_id):
+            raise ValueError('ResultCorrelationId doit contenir exactement 32 caractères hexadécimaux')
+        results_path /= correlation_id
+
     results_path.mkdir(parents=True, exist_ok=True)
 
     results_path_value = str(results_path)
@@ -70,5 +79,12 @@ def finalize_launch_config(config: dict, instance_cfg: dict, game_cfg: dict) -> 
         results_path_value += os.sep
 
     server['ResultsPath'] = results_path_value
+
+    materialize_entry_list(
+        cfg,
+        game_cfg,
+        server.get('LaunchSessionId'),
+        str(instance_cfg['id']),
+    )
 
     return cfg
