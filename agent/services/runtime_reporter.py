@@ -1,11 +1,14 @@
 import json
 import logging
+import os
 import threading
 import time
 import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from functools import lru_cache
+from pathlib import Path
 
 import psutil
 
@@ -36,6 +39,30 @@ def _safe_float(value):
         return round(float(value), 2)
     except (TypeError, ValueError):
         return None
+
+
+@lru_cache(maxsize=1)
+def _agent_version() -> str:
+    # Allows CI/runtime override when needed, otherwise use install metadata.
+    env_version = (os.getenv('PITLANE_AGENT_VERSION') or '').strip()
+    if env_version:
+        return env_version
+
+    version_path = Path(__file__).resolve().parents[1] / 'version.json'
+    if not version_path.exists():
+        return 'unknown'
+
+    try:
+        payload = json.loads(version_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return 'unknown'
+
+    for key in ('tag_name', 'name', 'version'):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return 'unknown'
 
 
 def _coerce_report_interval(value) -> int:
@@ -363,7 +390,7 @@ def build_runtime_report() -> dict:
 
     return {
         'agent': {
-            'version': '0.3.7',
+            'version': _agent_version(),
             'server_time': _utc_now(),
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,
