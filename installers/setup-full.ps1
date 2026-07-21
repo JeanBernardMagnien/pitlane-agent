@@ -38,8 +38,16 @@ function Find-AcEvoServer {
 }
 
 function Get-AppManifestPath {
-    param([string]$SteamCmdDir)
-    return Join-Path $SteamCmdDir "steamapps\appmanifest_4564210.acf"
+    param([string]$AcEvoPath)
+
+    if ([string]::IsNullOrWhiteSpace($AcEvoPath)) {
+        throw "Impossible de deduire appmanifest_path : AcEvoPath est vide"
+    }
+
+    # L'agent met a jour via "+force_install_dir <AcEvoPath>", qui cree son propre
+    # sous-dossier steamapps dans AcEvoPath. Le manifest a surveiller est donc toujours ici,
+    # pas dans la bibliotheque SteamCMD principale.
+    return Join-Path $AcEvoPath "steamapps\appmanifest_4564210.acf"
 }
 
 function Get-RealPython {
@@ -675,7 +683,7 @@ $form.Add_Shown({
     $publicIp        = Get-PublicIp
     $BaseUrl         = "http://$publicIp"
     $AgentUrl        = "http://$publicIp`:8181"
-    $AppManifestPath = Get-AppManifestPath -SteamCmdDir $SteamCmdDir
+    $AppManifestPath = Get-AppManifestPath -AcEvoPath $AcEvoPath
 
     $configContent = Get-Content "$AgentPath\config.template.yml" -Raw
     $configContent = $configContent.Replace("__BASE_URL__",         $BaseUrl)
