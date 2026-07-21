@@ -219,7 +219,9 @@ function Write-VersionFile {
         $data.html_url = $ReleaseInfo.html_url
     }
 
-    ($data | ConvertTo-Json -Depth 4) | Set-Content -Path $versionPath -Encoding UTF8
+    # UTF-8 sans BOM: l'agent Python parse version.json, un BOM casserait json.loads.
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($versionPath, ($data | ConvertTo-Json -Depth 4), $utf8NoBom)
     Add-Log "version.json mis a jour"
 }
 

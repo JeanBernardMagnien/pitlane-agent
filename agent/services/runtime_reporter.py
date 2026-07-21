@@ -46,23 +46,32 @@ def _agent_version() -> str:
     # Allows CI/runtime override when needed, otherwise use install metadata.
     env_version = (os.getenv('PITLANE_AGENT_VERSION') or '').strip()
     if env_version:
-        return env_version
+        return _normalize_version(env_version)
 
     version_path = Path(__file__).resolve().parents[1] / 'version.json'
     if not version_path.exists():
         return 'unknown'
 
     try:
-        payload = json.loads(version_path.read_text(encoding='utf-8'))
+        # utf-8-sig: les installeurs PowerShell écrivent version.json avec un BOM.
+        payload = json.loads(version_path.read_text(encoding='utf-8-sig'))
     except (OSError, json.JSONDecodeError):
         return 'unknown'
 
     for key in ('tag_name', 'name', 'version'):
         value = payload.get(key)
         if isinstance(value, str) and value.strip():
-            return value.strip()
+            return _normalize_version(value)
 
     return 'unknown'
+
+
+def _normalize_version(value: str) -> str:
+    # Le hub attend le semver nu (ex: '0.3.7'), sans le préfixe 'v' des tags GitHub.
+    version = value.strip()
+    if version[:1] in ('v', 'V') and version[1:2].isdigit():
+        version = version[1:]
+    return version
 
 
 def _coerce_report_interval(value) -> int:
