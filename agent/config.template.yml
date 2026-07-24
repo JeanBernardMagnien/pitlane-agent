@@ -91,3 +91,32 @@ logging:
   results_spool_max_bytes: 1073741824
   results_spool_minimum_free_bytes: 5368709120
   max_lines: 500
+
+# Capacity Profiler : mesure locale de charge réelle (CPU/RAM/réseau/disque et
+# par instance) pendant des runs de test, pour dimensionner les offres serveur.
+# Interface locale uniquement en V1, rien n'est envoyé au Hub.
+capacity_profiler:
+  # Cadence dédiée, découplée du runtime_scan_interval (0.5s) utilisé pour le
+  # reporting hub temps réel : la profiling n'a pas besoin de résolution
+  # sub-seconde, et une cadence plus grossière limite le bruit auto-corrélé
+  # dans les percentiles et la taille de la base.
+  sample_interval_seconds: 8
+  # Filet de sécurité : arrête automatiquement un run oublié en cours
+  # (stop_reason = timeout).
+  max_run_duration_seconds: 43200
+  # Rétention des snapshots bruts (résolution fine, volumineux).
+  snapshot_retention_days: 30
+  # Rétention des résumés de run (léger) : conservés plus longtemps.
+  run_retention_days: 365
+  cleanup_limit: 5000
+  # Par défaut : <logs_path>/capacity-profiler.sqlite3
+  # db_path: C:\\PitLane\\capacity-profiler.sqlite3
+  # Étiquette machine affichée dans les runs ; par défaut le hostname.
+  # server_name: OVH-EG-32-01
+
+  # Déclenchement automatique par seuil de pilotes — valeurs de départ seulement,
+  # ensuite modifiables et persistées depuis la page locale (pas ici).
+  auto_start_enabled: false
+  auto_start_driver_threshold: 10
+  auto_start_grace_seconds: 60
+  auto_stop_grace_seconds: 60

@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PitLane — Capacity Profiler</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #d9dce1;
+    --text: #1a1d21;
+    --muted: #5b6270;
+    --accent: #2563eb;
+    --ok: #16a34a;
+    --watch: #d97706;
+    --risk: #dc2626;
+    --critical: #6d28d9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --panel: #1d2025;
+      --border: #33373f;
+      --text: #e6e8eb;
+      --muted: #9aa1ad;
+      --accent: #60a5fa;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+  .checkbox-row input { width: auto; }
+  .hint { color: var(--muted); font-size: 11px; margin: 4px 0 0; }
+  input, select {
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  button {
+    margin-top: 14px;
+    padding: 9px 14px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.stop { background: var(--risk); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 12px;
+    color: white;
+  }
+  .badge-OK { background: var(--ok); }
+  .badge-WATCH { background: var(--watch); }
+  .badge-RISK { background: var(--risk); }
+  .badge-CRITICAL { background: var(--critical); }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-top: 14px; }
+  .metric { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .metric .value { font-size: 20px; font-weight: 700; }
+  .metric .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 14px; }
+  .chart-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+  svg.spark { width: 100%; height: 70px; display: block; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 640px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  .error { color: var(--risk); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Capacity Profiler</h1>
+<p class="subtitle">Mesure locale de charge réelle — agent uniquement, rien n'est envoyé au Hub.</p>
+
+<div class="grid">
+  <div class="panel" id="control-panel">
+    <h2>Run</h2>
+    <div id="start-form">
+      <label for="test_label">Étiquette du test</label>
+      <input id="test_label" placeholder="ex: Public Spa all cars">
+      <label for="track">Circuit</label>
+      <input id="track" placeholder="ex: spa">
+      <label for="allowed_cars_mode">Mode voitures autorisées</label>
+      <input id="allowed_cars_mode" placeholder="ex: ALL_CARS">
+      <label for="server_profile_type">Type de profil serveur</label>
+      <input id="server_profile_type" placeholder="ex: PUBLIC_OPEN">
+      <button id="start-btn">Démarrer un run</button>
+      <div class="error" id="start-error"></div>
+    </div>
+    <div id="active-run" style="display:none">
+      <div><span class="badge" id="live-badge">—</span> <strong id="live-label"></strong></div>
+      <label for="stop_reason">Motif d'arrêt</label>
+      <select id="stop_reason">
+        <option value="manual">Arrêt volontaire</option>
+        <option value="crash">Crash observé pendant le run</option>
+      </select>
+      <button class="stop" id="stop-btn">Arrêter le run</button>
+      <div class="error" id="stop-error"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="settings-panel">
+    <h2>Déclenchement automatique</h2>
+    <label class="checkbox-row">
+      <input type="checkbox" id="auto_start_enabled">
+      Démarrer/arrêter automatiquement selon le nombre de pilotes
+    </label>
+    <label for="driver_threshold">Seuil de pilotes (total serveur)</label>
+    <input type="number" id="driver_threshold" min="0" step="1">
+    <label for="start_grace_seconds">Délai avant démarrage (s)</label>
+    <input type="number" id="start_grace_seconds" min="0" step="1">
+    <label for="stop_grace_seconds">Délai avant arrêt (s)</label>
+    <input type="number" id="stop_grace_seconds" min="0" step="1">
+    <p class="hint">Un délai évite les démarrages/arrêts en rafale si le nombre de pilotes oscille autour du seuil. Un run démarré manuellement n'est jamais arrêté automatiquement.</p>
+    <button id="settings-save-btn">Enregistrer</button>
+    <div class="error" id="settings-error"></div>
+  </div>
+
+  <div class="panel">
+    <h2>État en direct</h2>
+    <div class="metrics">
+      <div class="metric"><div class="value" id="m-cpu-total">—</div><div class="label">CPU total %</div></div>
+      <div class="metric"><div class="value" id="m-cpu-core">—</div><div class="label">CPU cœur max %</div></div>
+      <div class="metric"><div class="value" id="m-ram">—</div><div class="label">RAM dispo %</div></div>
+      <div class="metric"><div class="value" id="m-drivers">—</div><div class="label">Pilotes</div></div>
+      <div class="metric"><div class="value" id="m-instances">—</div><div class="label">Instances</div></div>
+    </div>
+    <div class="charts">
+      <div>
+        <div class="chart-title">CPU cœur max %</div>
+        <svg class="spark" id="chart-cpu"></svg>
+      </div>
+      <div>
+        <div class="chart-title">RAM disponible %</div>
+        <svg class="spark" id="chart-ram"></svg>
+      </div>
+      <div>
+        <div class="chart-title">Pilotes connectés</div>
+        <svg class="spark" id="chart-drivers"></svg>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px">
+  <h2>Runs précédents</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Début</th><th>Label</th><th>Durée</th><th>Max pilotes</th><th>Max instances</th>
+          <th>Risque</th><th>Facteur limitant</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+    <div class="empty" id="history-empty" style="display:none">Aucun run enregistré pour l'instant.</div>
+  </div>
+</div>
+
+<script>
+const POLL_MS = 5000;
+let activeRunId = null;
+
+function el(id) { return document.getElementById(id); }
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+function fmtDuration(seconds) {
+  if (seconds == null) return '—';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return (h ? h + 'h' : '') + String(m).padStart(2, '0') + 'm' + String(s).padStart(2, '0') + 's';
+}
+
+function ramAvailablePercent(snapshot, ramTotalMb) {
+  if (snapshot.ram_available_mb != null && ramTotalMb) {
+    return Math.round((snapshot.ram_available_mb / ramTotalMb) * 1000) / 10;
+  }
+  if (snapshot.ram_percent != null) {
+    return Math.round((100 - snapshot.ram_percent) * 10) / 10;
+  }
+  return null;
+}
+
+function sparkline(svg, values, color) {
+  const width = 300, height = 70, pad = 4;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  const points = values.filter(v => v != null);
+  if (points.length < 2) {
+    svg.innerHTML = '';
+    return;
+  }
+  const min = Math.min(...points), max = Math.max(...points);
+  const span = (max - min) || 1;
+  const stepX = (width - pad * 2) / (values.length - 1);
+  let path = '';
+  values.forEach((v, i) => {
+    if (v == null) return;
+    const x = pad + i * stepX;
+    const y = height - pad - ((v - min) / span) * (height - pad * 2);
+    path += (path ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1);
+  });
+  svg.innerHTML = `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+async function refreshCurrent() {
+  let status;
+  try {
+    status = await api('/api/capacity-profiler/runs/current');
+  } catch (e) {
+    return;
+  }
+
+  if (!status.active) {
+    activeRunId = null;
+    el('start-form').style.display = 'block';
+    el('active-run').style.display = 'none';
+    el('m-cpu-total').textContent = '—';
+    el('m-cpu-core').textContent = '—';
+    el('m-ram').textContent = '—';
+    el('m-drivers').textContent = '—';
+    el('m-instances').textContent = '—';
+    return;
+  }
+
+  activeRunId = status.run.id;
+  el('start-form').style.display = 'none';
+  el('active-run').style.display = 'block';
+  const originTag = status.run.start_reason === 'auto_threshold' ? ' (déclenché automatiquement)' : '';
+  el('live-label').textContent = (status.run.test_label || ('Run #' + status.run.id)) + originTag;
+
+  const badge = el('live-badge');
+  badge.textContent = status.live_risk_level + (status.live_limiting_factor && status.live_limiting_factor !== 'none' ? ' · ' + status.live_limiting_factor : '');
+  badge.className = 'badge badge-' + status.live_risk_level;
+
+  const latest = status.latest_snapshot;
+  if (latest) {
+    el('m-cpu-total').textContent = latest.cpu_total_percent != null ? latest.cpu_total_percent + '%' : '—';
+    el('m-cpu-core').textContent = latest.cpu_core_max_percent != null ? latest.cpu_core_max_percent + '%' : '—';
+    const ramPct = ramAvailablePercent(latest, status.run.ram_total_mb);
+    el('m-ram').textContent = ramPct != null ? ramPct + '%' : '—';
+    el('m-drivers').textContent = latest.total_connected_drivers ?? '—';
+    el('m-instances').textContent = latest.active_instances_count ?? '—';
+  }
+
+  try {
+    const snapshots = await api(`/api/capacity-profiler/runs/${activeRunId}/snapshots?limit=200`);
+    sparkline(el('chart-cpu'), snapshots.map(s => s.cpu_core_max_percent), '#dc2626');
+    sparkline(el('chart-ram'), snapshots.map(s => ramAvailablePercent(s, status.run.ram_total_mb)), '#2563eb');
+    sparkline(el('chart-drivers'), snapshots.map(s => s.total_connected_drivers), '#16a34a');
+  } catch (e) {
+    // Silencieux : les graphiques restent simplement vides si l'appel échoue.
+  }
+}
+
+async function refreshHistory() {
+  let runs;
+  try {
+    runs = await api('/api/capacity-profiler/runs?limit=25');
+  } catch (e) {
+    return;
+  }
+
+  const tbody = el('history-body');
+  tbody.innerHTML = '';
+  el('history-empty').style.display = runs.length ? 'none' : 'block';
+
+  for (const run of runs) {
+    const tr = document.createElement('tr');
+    const badge = run.risk_level
+      ? `<span class="badge badge-${run.risk_level}">${run.risk_level}</span>`
+      : '—';
+    tr.innerHTML = `
+      <td>${run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</td>
+      <td>${run.test_label || '—'}</td>
+      <td>${fmtDuration(run.duration_seconds)}</td>
+      <td>${run.max_total_drivers ?? '—'}</td>
+      <td>${run.max_simultaneous_instances ?? '—'}</td>
+      <td>${badge}</td>
+      <td>${run.limiting_factor || '—'}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+el('start-btn').addEventListener('click', async () => {
+  el('start-error').textContent = '';
+  try {
+    await api('/api/capacity-profiler/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        test_label: el('test_label').value || null,
+        track: el('track').value || null,
+        allowed_cars_mode: el('allowed_cars_mode').value || null,
+        server_profile_type: el('server_profile_type').value || null,
+      }),
+    });
+    await refreshCurrent();
+  } catch (e) {
+    el('start-error').textContent = e.message;
+  }
+});
+
+el('stop-btn').addEventListener('click', async () => {
+  el('stop-error').textContent = '';
+  if (!activeRunId) return;
+  try {
+    await api(`/api/capacity-profiler/runs/${activeRunId}/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stop_reason: el('stop_reason').value }),
+    });
+    await refreshCurrent();
+    await refreshHistory();
+  } catch (e) {
+    el('stop-error').textContent = e.message;
+  }
+});
+
+async function loadSettings() {
+  let settings;
+  try {
+    settings = await api('/api/capacity-profiler/settings');
+  } catch (e) {
+    return;
+  }
+  el('auto_start_enabled').checked = !!settings.auto_start_enabled;
+  el('driver_threshold').value = settings.driver_threshold;
+  el('start_grace_seconds').value = settings.start_grace_seconds;
+  el('stop_grace_seconds').value = settings.stop_grace_seconds;
+}
+
+el('settings-save-btn').addEventListener('click', async () => {
+  el('settings-error').textContent = '';
+  try {
+    await api('/api/capacity-profiler/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        auto_start_enabled: el('auto_start_enabled').checked,
+        driver_threshold: Number(el('driver_threshold').value),
+        start_grace_seconds: Number(el('start_grace_seconds').value),
+        stop_grace_seconds: Number(el('stop_grace_seconds').value),
+      }),
+    });
+    await loadSettings();
+  } catch (e) {
+    el('settings-error').textContent = e.message;
+  }
+});
+
+async function tick() {
+  await refreshCurrent();
+  await refreshHistory();
+}
+
+loadSettings();
+tick();
+setInterval(tick, POLL_MS);
+</script>
+
+</body>
+</html>

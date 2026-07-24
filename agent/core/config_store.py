@@ -12,6 +12,7 @@ GAME_CFG = {}
 AUTH_CFG = {}
 HTTP_CFG = {}
 LOGGING_CFG = {}
+CAPACITY_PROFILER_CFG = {}
 
 
 def load_config() -> dict:
@@ -25,12 +26,14 @@ def save_config(cfg: dict):
 
 
 def _apply_config(cfg: dict):
-    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG
+    global CFG, GAME_CFG, AUTH_CFG, HTTP_CFG, LOGGING_CFG, CAPACITY_PROFILER_CFG
     CFG = cfg
     GAME_CFG = cfg['game']
     AUTH_CFG = cfg['auth']
     HTTP_CFG = cfg['http']
     LOGGING_CFG = cfg['logging']
+    # Section optionnelle : une install existante sans capacity_profiler ne doit pas casser.
+    CAPACITY_PROFILER_CFG = cfg.get('capacity_profiler') or {}
 
 
 def reload_from_disk():
