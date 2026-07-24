@@ -156,6 +156,7 @@
     </div>
     <div id="active-run" style="display:none">
       <div><span class="badge" id="live-badge">—</span> <strong id="live-label"></strong></div>
+      <p class="hint" id="live-machine"></p>
       <label for="stop_reason">Motif d'arrêt</label>
       <select id="stop_reason">
         <option value="manual">Arrêt volontaire</option>
@@ -191,9 +192,11 @@
       <div class="metric"><div class="value" id="m-ram">—</div><div class="label">RAM dispo %</div></div>
       <div class="metric"><div class="value" id="m-drivers">—</div><div class="label">Pilotes</div></div>
       <div class="metric"><div class="value" id="m-instances">—</div><div class="label">Instances</div></div>
+      <div class="metric"><div class="value" id="m-cpu-per-driver">—</div><div class="label">CPU % / pilote</div></div>
       <div class="metric"><div class="value" id="m-net">—</div><div class="label">Réseau ↑/↓ MB/s</div></div>
       <div class="metric"><div class="value" id="m-disk">—</div><div class="label">Disque L/E KB/s</div></div>
     </div>
+    <p class="hint">CPU % / pilote = CPU total ÷ pilotes connectés — coût CPU marginal par pilote, indépendant du nombre de pilotes. Utile pour comparer des machines ou estimer le coût d'un pilote de plus.</p>
   </div>
 </div>
 
@@ -306,6 +309,28 @@ function ramAvailablePercent(snapshot, ramTotalMb) {
   return null;
 }
 
+/* Interpolation Catmull-Rom -> Bézier : passe exactement par chaque point mesuré,
+   juste la jonction entre les points est courbe au lieu de segments droits anguleux. */
+function smoothPath(pts) {
+  if (pts.length < 2) return '';
+  if (pts.length === 2) {
+    return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)} L${pts[1].x.toFixed(1)},${pts[1].y.toFixed(1)}`;
+  }
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
 /* ---- Graphique en ligne : axe Y fixe ou auto, grille, seuils de risque, info-bulle ---- */
 function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
   const width = 320, height = 130;
@@ -355,14 +380,19 @@ function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
     svg += `<text x="${width - marginRight}" y="${(y - 2.5).toFixed(1)}" text-anchor="end" class="chart-threshold-label" fill="${th.color}">${th.label}</text>`;
   }
 
-  let path = '';
+  const segments = [];
+  let current = [];
   points.forEach((p, i) => {
     const v = p[valueKey];
-    if (v == null) return;
-    const x = xAt(i), y = yAt(v);
-    const prevKnown = i > 0 && points[i - 1][valueKey] != null;
-    path += (path === '' || !prevKnown ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+    if (v == null) {
+      if (current.length) segments.push(current);
+      current = [];
+      return;
+    }
+    current.push({ x: xAt(i), y: yAt(v) });
   });
+  if (current.length) segments.push(current);
+  const path = segments.map(seg => smoothPath(seg)).filter(Boolean).join(' ');
   svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
 
   let lastIdx = -1;
@@ -463,7 +493,7 @@ async function refreshCurrent() {
     activeRunId = null;
     el('start-form').style.display = 'block';
     el('active-run').style.display = 'none';
-    ['m-cpu-total', 'm-cpu-core', 'm-ram', 'm-drivers', 'm-instances', 'm-net', 'm-disk'].forEach(id => el(id).textContent = '—');
+    ['m-cpu-total', 'm-cpu-core', 'm-ram', 'm-drivers', 'm-instances', 'm-cpu-per-driver', 'm-net', 'm-disk'].forEach(id => el(id).textContent = '—');
     renderCoreBars(el('chart-cores'), null);
     el('instances-body').innerHTML = '';
     el('instances-empty').style.display = 'block';
@@ -475,6 +505,13 @@ async function refreshCurrent() {
   el('active-run').style.display = 'block';
   const originTag = status.run.start_reason === 'auto_threshold' ? ' (déclenché automatiquement)' : '';
   el('live-label').textContent = (status.run.test_label || ('Run #' + status.run.id)) + originTag;
+  const machineBits = [
+    status.run.server_name,
+    status.run.cpu_model,
+    status.run.cpu_cores ? status.run.cpu_cores + ' cœurs' : null,
+    status.run.ram_total_mb ? Math.round(status.run.ram_total_mb / 1024) + ' Go RAM' : null,
+  ].filter(Boolean);
+  el('live-machine').textContent = machineBits.join(' · ');
 
   const badge = el('live-badge');
   badge.textContent = status.live_risk_level + (status.live_limiting_factor && status.live_limiting_factor !== 'none' ? ' · ' + status.live_limiting_factor : '');
@@ -488,6 +525,10 @@ async function refreshCurrent() {
     el('m-ram').textContent = ramPct != null ? ramPct + '%' : '—';
     el('m-drivers').textContent = latest.total_connected_drivers ?? '—';
     el('m-instances').textContent = latest.active_instances_count ?? '—';
+    const drivers = latest.total_connected_drivers;
+    el('m-cpu-per-driver').textContent = (latest.cpu_total_percent != null && drivers)
+      ? (Math.round((latest.cpu_total_percent / drivers) * 100) / 100) + '%'
+      : '—';
     const tx = latest.network_tx_mbps, rx = latest.network_rx_mbps;
     el('m-net').textContent = (tx != null || rx != null) ? `${tx ?? '—'} / ${rx ?? '—'}` : '—';
     const dr = latest.disk_read_kbps, dw = latest.disk_write_kbps;
