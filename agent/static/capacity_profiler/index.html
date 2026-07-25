@@ -106,13 +106,13 @@
   .chart-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
   .chart-box { position: relative; }
   svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
-  .chart-grid { stroke: var(--chart-grid); stroke-width: 1; }
-  .chart-axis { stroke: var(--chart-axis); stroke-width: 1; }
-  .chart-tick { fill: var(--chart-muted); font-size: 7px; }
-  .chart-threshold-label { font-size: 6.5px; font-weight: 700; }
-  .chart-end-label { fill: var(--text); font-size: 8px; font-weight: 700; }
+  .chart-grid { stroke: var(--chart-grid); stroke-width: 0.6; }
+  .chart-axis { stroke: var(--chart-axis); stroke-width: 0.6; }
+  .chart-tick { fill: var(--chart-muted); font-size: 7px; font-weight: 400; }
+  .chart-threshold-label { font-size: 6.5px; font-weight: 600; }
+  .chart-end-label { fill: var(--text); font-size: 8px; font-weight: 600; }
   .chart-empty { fill: var(--muted); font-size: 8px; font-style: italic; }
-  .chart-crosshair { stroke: var(--chart-axis); stroke-width: 1; pointer-events: none; opacity: 0; }
+  .chart-crosshair { stroke: var(--chart-axis); stroke-width: 0.6; pointer-events: none; opacity: 0; }
   .chart-tooltip {
     position: absolute;
     pointer-events: none;
@@ -126,6 +126,12 @@
     transform: translate(-50%, -100%);
     z-index: 5;
   }
+  .core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 8px; margin-top: 4px; }
+  .core-cell { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; }
+  .core-cell .core-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+  .core-cell .core-value { font-weight: 600; color: var(--text); font-size: 12px; }
+  .core-meter-track { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .core-meter-fill { height: 100%; border-radius: 3px; }
   .table-scroll { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 480px; }
   th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -203,9 +209,7 @@
 <div class="grid" style="margin-top:16px">
   <div class="panel">
     <h2>Répartition CPU par cœur (instant)</h2>
-    <div class="chart-box">
-      <svg class="chart" id="chart-cores"></svg>
-    </div>
+    <div class="core-grid" id="core-grid"></div>
     <p class="hint">Un cœur au-dessus du seuil rouge (95%) est le signe d'un plafond single-core, même si le CPU total semble encore correct.</p>
   </div>
 
@@ -333,8 +337,8 @@ function smoothPath(pts) {
 
 /* ---- Graphique en ligne : axe Y fixe ou auto, grille, seuils de risque, info-bulle ---- */
 function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
-  const width = 320, height = 130;
-  const marginLeft = 28, marginRight = 8, marginTop = 10, marginBottom = 16;
+  const width = 360, height = 170;
+  const marginLeft = 30, marginRight = 10, marginTop = 12, marginBottom = 18;
   const plotW = width - marginLeft - marginRight;
   const plotH = height - marginTop - marginBottom;
   const color = opts.color || 'var(--chart-line)';
@@ -376,7 +380,7 @@ function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
   for (const th of thresholds) {
     if (th.value < yMin || th.value > yMax) continue;
     const y = yAt(th.value);
-    svg += `<line x1="${marginLeft}" y1="${y.toFixed(1)}" x2="${width - marginRight}" y2="${y.toFixed(1)}" stroke="${th.color}" stroke-width="1" stroke-dasharray="3,2"/>`;
+    svg += `<line x1="${marginLeft}" y1="${y.toFixed(1)}" x2="${width - marginRight}" y2="${y.toFixed(1)}" stroke="${th.color}" stroke-width="0.75" stroke-dasharray="2,2"/>`;
     svg += `<text x="${width - marginRight}" y="${(y - 2.5).toFixed(1)}" text-anchor="end" class="chart-threshold-label" fill="${th.color}">${th.label}</text>`;
   }
 
@@ -393,7 +397,7 @@ function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
   });
   if (current.length) segments.push(current);
   const path = segments.map(seg => smoothPath(seg)).filter(Boolean).join(' ');
-  svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+  svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
 
   let lastIdx = -1;
   for (let i = points.length - 1; i >= 0; i--) {
@@ -402,7 +406,7 @@ function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
   if (lastIdx >= 0) {
     const lastV = points[lastIdx][valueKey];
     const x = xAt(lastIdx), y = yAt(lastV);
-    svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${color}" stroke="var(--panel)" stroke-width="2"/>`;
+    svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="${color}" stroke="var(--panel)" stroke-width="1.5"/>`;
     const anchor = x > width - 60 ? 'end' : 'start';
     const lx = anchor === 'end' ? x - 6 : x + 6;
     svg += `<text x="${lx.toFixed(1)}" y="${(y - 7).toFixed(1)}" text-anchor="${anchor}" class="chart-end-label">${lastV}${unit}</text>`;
@@ -440,45 +444,23 @@ function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
   };
 }
 
-/* ---- Barres par cœur CPU : met en évidence le(s) cœur(s) au-dessus des seuils ---- */
-function renderCoreBars(svgEl, perCore) {
-  const width = 320, height = 110;
-  const marginLeft = 26, marginRight = 6, marginTop = 8, marginBottom = 16;
-  const plotW = width - marginLeft - marginRight;
-  const plotH = height - marginTop - marginBottom;
-
-  svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
-
+/* ---- Cœurs CPU : une jauge compacte par cœur, se replie proprement quel que
+   soit le nombre de threads (contrairement à des barres qui s'écrasent). ---- */
+function renderCoreGrid(container, perCore) {
   if (!perCore || !perCore.length) {
-    svgEl.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="chart-empty">Pas de run actif</text>`;
+    container.innerHTML = `<div class="empty">Pas de run actif</div>`;
     return;
   }
 
-  const yAt = v => marginTop + plotH - (Math.min(v, 100) / 100) * plotH;
-  const slot = plotW / perCore.length;
-  const barW = Math.min(26, slot - 6);
-
-  let svg = '';
-  [0, 25, 50, 75, 100].forEach(t => {
-    const y = yAt(t);
-    svg += `<line x1="${marginLeft}" y1="${y.toFixed(1)}" x2="${width - marginRight}" y2="${y.toFixed(1)}" class="chart-grid"/>`;
-    svg += `<text x="${marginLeft - 5}" y="${(y + 2.5).toFixed(1)}" text-anchor="end" class="chart-tick">${t}</text>`;
-  });
-  CPU_CORE_THRESHOLDS.forEach(th => {
-    const y = yAt(th.value);
-    svg += `<line x1="${marginLeft}" y1="${y.toFixed(1)}" x2="${width - marginRight}" y2="${y.toFixed(1)}" stroke="${th.color}" stroke-width="1" stroke-dasharray="3,2"/>`;
-  });
-
-  perCore.forEach((v, i) => {
-    const x = marginLeft + i * slot + (slot - barW) / 2;
-    const y = yAt(v);
-    const h = (marginTop + plotH) - y;
-    const color = v >= 95 ? 'var(--status-critical)' : v >= 85 ? 'var(--status-serious)' : v >= 75 ? 'var(--status-warning)' : 'var(--chart-line)';
-    svg += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${Math.max(0, h).toFixed(1)}" rx="3" fill="${color}"/>`;
-    svg += `<text x="${(x + barW / 2).toFixed(1)}" y="${height - 4}" text-anchor="middle" class="chart-tick">C${i}</text>`;
-  });
-
-  svgEl.innerHTML = svg;
+  container.innerHTML = perCore.map((v, i) => {
+    const pct = Math.min(100, Math.max(0, v));
+    const status = v >= 95 ? 'critical' : v >= 85 ? 'serious' : v >= 75 ? 'warning' : 'good';
+    return `
+      <div class="core-cell">
+        <div class="core-head"><span>C${i}</span><span class="core-value">${v}%</span></div>
+        <div class="core-meter-track"><div class="core-meter-fill" style="width:${pct}%;background:var(--status-${status})"></div></div>
+      </div>`;
+  }).join('');
 }
 
 async function refreshCurrent() {
@@ -494,7 +476,7 @@ async function refreshCurrent() {
     el('start-form').style.display = 'block';
     el('active-run').style.display = 'none';
     ['m-cpu-total', 'm-cpu-core', 'm-ram', 'm-drivers', 'm-instances', 'm-cpu-per-driver', 'm-net', 'm-disk'].forEach(id => el(id).textContent = '—');
-    renderCoreBars(el('chart-cores'), null);
+    renderCoreGrid(el('core-grid'), null);
     el('instances-body').innerHTML = '';
     el('instances-empty').style.display = 'block';
     return;
@@ -534,7 +516,7 @@ async function refreshCurrent() {
     const dr = latest.disk_read_kbps, dw = latest.disk_write_kbps;
     el('m-disk').textContent = (dr != null || dw != null) ? `${dr ?? '—'} / ${dw ?? '—'}` : '—';
 
-    renderCoreBars(el('chart-cores'), latest.cpu_per_core);
+    renderCoreGrid(el('core-grid'), latest.cpu_per_core);
 
     const instances = latest.instances || [];
     const tbody = el('instances-body');
