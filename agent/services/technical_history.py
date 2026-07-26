@@ -14,12 +14,18 @@ MAINTENANCE_INTERVAL_SECONDS = 3600.0
 _lock = threading.Lock()
 _last_sample_monotonic = 0.0
 _last_maintenance_monotonic = 0.0
+_last_io_state = None
 
 
-def record_runtime_report(report: dict, now: float | None = None) -> bool:
-    global _last_sample_monotonic, _last_maintenance_monotonic
+def record_runtime_report(
+    report: dict,
+    system_sample: dict | None = None,
+    now: float | None = None,
+) -> bool:
+    global _last_sample_monotonic, _last_maintenance_monotonic, _last_io_state
 
     now = time.monotonic() if now is None else now
+    system_sample = system_sample if isinstance(system_sample, dict) else {}
     interval = _positive_number(
         config_store.CAPACITY_PROFILER_CFG.get('technical_history_interval_seconds'),
         DEFAULT_SAMPLE_INTERVAL_SECONDS,
@@ -29,10 +35,12 @@ def record_runtime_report(report: dict, now: float | None = None) -> bool:
         if _last_sample_monotonic and now - _last_sample_monotonic < interval:
             return False
 
-        snapshot = _snapshot_from_runtime_report(report)
+        io_rates, new_io_state = _io_rates(system_sample, _last_io_state, now)
+        snapshot = _snapshot_from_runtime_report(report, system_sample, io_rates)
         store = get_capacity_profiler_store()
         store.insert_technical_history_snapshot(snapshot)
         _last_sample_monotonic = now
+        _last_io_state = new_io_state
 
         if (
             not _last_maintenance_monotonic
@@ -49,8 +57,14 @@ def record_runtime_report(report: dict, now: float | None = None) -> bool:
     return True
 
 
-def _snapshot_from_runtime_report(report: dict) -> dict:
+def _snapshot_from_runtime_report(
+    report: dict,
+    system_sample: dict | None = None,
+    io_rates: dict | None = None,
+) -> dict:
     agent = report.get('agent') if isinstance(report.get('agent'), dict) else {}
+    system_sample = system_sample if isinstance(system_sample, dict) else {}
+    io_rates = io_rates if isinstance(io_rates, dict) else {}
     reported_instances = report.get('instances') if isinstance(report.get('instances'), list) else []
     instances = []
 
@@ -81,15 +95,86 @@ def _snapshot_from_runtime_report(report: dict) -> dict:
     return {
         'captured_at': agent.get('server_time') or _utc_now(),
         'cpu_total_percent': agent.get('cpu_percent'),
+        'cpu_core_max_percent': agent.get('cpu_core_max_percent'),
+        'cpu_per_core': system_sample.get('cpu_per_core'),
         'ram_used_mb': _gb_to_mb(agent.get('ram_used_gb')),
         'ram_total_mb': _gb_to_mb(agent.get('ram_total_gb')),
         'ram_percent': agent.get('ram_percent'),
+        'network_tx_mbps': io_rates.get('network_tx_mbps'),
+        'network_rx_mbps': io_rates.get('network_rx_mbps'),
+        'disk_read_kbps': io_rates.get('disk_read_kbps'),
+        'disk_write_kbps': io_rates.get('disk_write_kbps'),
         'active_instances_count': len(running),
         'total_connected_drivers': sum(
             int(item.get('connected_drivers') or 0) for item in running
         ),
         'instances': instances,
     }
+
+
+def _io_rates(
+    system_sample: dict,
+    previous_state: dict | None,
+    now: float,
+) -> tuple[dict, dict]:
+    current_state = {
+        'network_bytes_sent': system_sample.get('network_bytes_sent'),
+        'network_bytes_received': system_sample.get('network_bytes_received'),
+        'disk_read_bytes': system_sample.get('disk_read_bytes'),
+        'disk_write_bytes': system_sample.get('disk_write_bytes'),
+        'at': now,
+    }
+    empty = {
+        'network_tx_mbps': None,
+        'network_rx_mbps': None,
+        'disk_read_kbps': None,
+        'disk_write_kbps': None,
+    }
+    if not previous_state:
+        return empty, current_state
+
+    elapsed = now - previous_state.get('at', now)
+    if elapsed <= 0:
+        return empty, current_state
+
+    return {
+        'network_tx_mbps': _delta_rate(
+            current_state['network_bytes_sent'],
+            previous_state.get('network_bytes_sent'),
+            elapsed,
+            1_000_000,
+        ),
+        'network_rx_mbps': _delta_rate(
+            current_state['network_bytes_received'],
+            previous_state.get('network_bytes_received'),
+            elapsed,
+            1_000_000,
+        ),
+        'disk_read_kbps': _delta_rate(
+            current_state['disk_read_bytes'],
+            previous_state.get('disk_read_bytes'),
+            elapsed,
+            1024,
+        ),
+        'disk_write_kbps': _delta_rate(
+            current_state['disk_write_bytes'],
+            previous_state.get('disk_write_bytes'),
+            elapsed,
+            1024,
+        ),
+    }, current_state
+
+
+def _delta_rate(current, previous, elapsed: float, divisor: float):
+    try:
+        delta = float(current) - float(previous)
+    except (TypeError, ValueError):
+        return None
+
+    if delta < 0:
+        return None
+
+    return round((delta / divisor) / elapsed, 3)
 
 
 def _gb_to_mb(value):
@@ -121,9 +206,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
-def safe_record_runtime_report(report: dict) -> None:
+def safe_record_runtime_report(report: dict, system_sample: dict | None = None) -> None:
     try:
-        record_runtime_report(report)
+        record_runtime_report(report, system_sample)
     except Exception as exc:
         logging.warning(
             '[technical-history] Échantillonnage impossible: %s',

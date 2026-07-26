@@ -19,6 +19,9 @@ class DiagnosticQueriesTest(unittest.TestCase):
         store.insert_technical_history_snapshot({
             'captured_at': '2026-07-24T12:00:00Z',
             'cpu_total_percent': 42,
+            'cpu_core_max_percent': 80,
+            'cpu_per_core': [80, 20],
+            'network_tx_mbps': 1.5,
             'instances': [],
         })
 
@@ -34,10 +37,13 @@ class DiagnosticQueriesTest(unittest.TestCase):
                 'limit': 100,
             })
 
-        self.assertEqual(1, payload['schema_version'])
+        self.assertEqual(2, payload['schema_version'])
         self.assertEqual('agent_sqlite', payload['source'])
         self.assertEqual(60.0, payload['sample_interval_seconds'])
         self.assertEqual(1, len(payload['samples']))
+        self.assertEqual(80.0, payload['summary']['cpu_core_max_percent']['p95'])
+        self.assertEqual(80.0, payload['summary']['cpu_per_core'][0]['max'])
+        self.assertEqual(1.5, payload['summary']['network_tx_mbps']['latest'])
 
     def test_unknown_or_unbounded_query_is_rejected(self):
         with self.assertRaises(DiagnosticQueryError):

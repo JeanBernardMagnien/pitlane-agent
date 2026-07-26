@@ -343,6 +343,22 @@ def build_runtime_report() -> dict:
     memory = psutil.virtual_memory()
     cpu_cores = psutil.cpu_count(logical=False) or 1
     cpu_threads = psutil.cpu_count(logical=True) or cpu_cores
+    cpu_total_percent = _safe_float(psutil.cpu_percent(interval=None))
+    cpu_per_core = psutil.cpu_percent(interval=None, percpu=True)
+    cpu_core_values = [
+        parsed
+        for value in cpu_per_core
+        if (parsed := _safe_float(value)) is not None
+    ]
+    cpu_core_max_percent = max(cpu_core_values, default=None)
+    try:
+        network_io = psutil.net_io_counters()
+    except Exception:
+        network_io = None
+    try:
+        disk_io = psutil.disk_io_counters()
+    except Exception:
+        disk_io = None
 
     try:
         from services.result_pipeline import result_spool_usage
@@ -369,7 +385,8 @@ def build_runtime_report() -> dict:
             'report_interval_seconds': _report_interval(),
             'cpu_cores': cpu_cores,
             'cpu_threads': cpu_threads,
-            'cpu_percent': _safe_float(psutil.cpu_percent(interval=None)),
+            'cpu_percent': cpu_total_percent,
+            'cpu_core_max_percent': cpu_core_max_percent,
             'ram_total_gb': round(memory.total / 1024 / 1024 / 1024, 2),
             'ram_used_gb': round(memory.used / 1024 / 1024 / 1024, 2),
             'ram_percent': _safe_float(memory.percent),
@@ -380,7 +397,13 @@ def build_runtime_report() -> dict:
     }
 
     from services.technical_history import safe_record_runtime_report
-    safe_record_runtime_report(report)
+    safe_record_runtime_report(report, {
+        'cpu_per_core': cpu_core_values,
+        'network_bytes_sent': network_io.bytes_sent if network_io else None,
+        'network_bytes_received': network_io.bytes_recv if network_io else None,
+        'disk_read_bytes': disk_io.read_bytes if disk_io else None,
+        'disk_write_bytes': disk_io.write_bytes if disk_io else None,
+    })
 
     return report
 

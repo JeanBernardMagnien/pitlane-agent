@@ -275,8 +275,13 @@ rejouées comme des mutations. La requête versionnée `technical_history` lit u
 tranche bornée de l'historique SQLite local : un point par minute et 30 jours de
 rétention par défaut, configurables avec
 `technical_history_interval_seconds` et `technical_history_retention_days`.
-Cette collecte continue reste indépendante des runs détaillés du Capacity
-Profiler.
+Chaque point conserve les charges CPU globale, maximale et par cœur, la RAM,
+les débits réseau et disque globaux, ainsi que les métriques non sensibles des
+instances. La réponse calcule min, moyenne, p95, maximum et dernière valeur sur
+la fenêtre complète avant de réduire les séries à 120 points. Cette collecte
+continue reste indépendante des runs détaillés du Capacity Profiler et n'alourdit
+pas le heartbeat : les séries ne quittent l'agent que lors d'une lecture
+diagnostique explicite.
 
 Le rapport runtime inclut les compteurs et la taille de ce journal. Son
 nettoyage reste conservateur : seuls les succès dont l'accusé terminal a été

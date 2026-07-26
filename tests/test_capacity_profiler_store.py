@@ -20,6 +20,49 @@ class CapacityProfilerStoreTest(unittest.TestCase):
             # Ré-instancier sur le même fichier ne doit pas lever d'erreur (CREATE TABLE IF NOT EXISTS).
             CapacityProfilerStore(store.path)
 
+    def test_technical_history_schema_is_extended_without_losing_existing_rows(self):
+        temporary_directory = tempfile.TemporaryDirectory()
+        with temporary_directory:
+            path = Path(temporary_directory.name) / 'capacity-profiler.sqlite3'
+            with sqlite3.connect(path) as connection:
+                connection.execute(
+                    '''
+                    CREATE TABLE technical_history_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        captured_at TEXT NOT NULL,
+                        cpu_total_percent REAL NULL,
+                        ram_used_mb REAL NULL,
+                        ram_total_mb REAL NULL,
+                        ram_percent REAL NULL,
+                        active_instances_count INTEGER NOT NULL DEFAULT 0,
+                        total_connected_drivers INTEGER NOT NULL DEFAULT 0,
+                        instances_json TEXT NOT NULL
+                    )
+                    '''
+                )
+                connection.execute(
+                    '''
+                    INSERT INTO technical_history_snapshots (
+                        captured_at, instances_json
+                    ) VALUES ('2026-07-24T12:00:00Z', '[]')
+                    '''
+                )
+
+            store = CapacityProfilerStore(path)
+            existing = store.list_technical_history(limit=1)[0]
+            store.insert_technical_history_snapshot({
+                'captured_at': '2026-07-24T12:01:00Z',
+                'cpu_per_core': [75, 20],
+                'network_tx_mbps': 1.25,
+                'instances': [],
+            })
+            extended = store.list_technical_history(limit=1)[0]
+
+            self.assertEqual('2026-07-24T12:00:00Z', existing['captured_at'])
+            self.assertIsNone(existing['cpu_per_core'])
+            self.assertEqual([75, 20], extended['cpu_per_core'])
+            self.assertEqual(1.25, extended['network_tx_mbps'])
+
     def test_create_run_defaults_to_running_status_and_manual_start_reason(self):
         store, temporary_directory = _store()
         with temporary_directory:
@@ -231,6 +274,10 @@ class CapacityProfilerStoreTest(unittest.TestCase):
                 store.insert_technical_history_snapshot({
                     'captured_at': f'2026-07-24T12:0{minute}:00Z',
                     'cpu_total_percent': 20.0 + minute,
+                    'cpu_core_max_percent': 40.0 + minute,
+                    'cpu_per_core': [40.0 + minute, 20.0 + minute],
+                    'network_tx_mbps': 0.5 + minute,
+                    'disk_write_kbps': 10.0 + minute,
                     'active_instances_count': 2,
                     'total_connected_drivers': minute,
                     'instances': [{
@@ -247,6 +294,10 @@ class CapacityProfilerStoreTest(unittest.TestCase):
                 [snapshot['captured_at'] for snapshot in snapshots],
             )
             self.assertEqual('server1', snapshots[0]['instances'][0]['id'])
+            self.assertEqual(42.0, snapshots[0]['cpu_core_max_percent'])
+            self.assertEqual([42.0, 22.0], snapshots[0]['cpu_per_core'])
+            self.assertEqual(2.5, snapshots[0]['network_tx_mbps'])
+            self.assertEqual(12.0, snapshots[0]['disk_write_kbps'])
             self.assertNotIn('instances_json', snapshots[0])
 
     def test_technical_history_since_and_purge_are_bounded(self):

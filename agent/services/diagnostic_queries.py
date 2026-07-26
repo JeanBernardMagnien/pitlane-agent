@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from core import config_store
+from services.capacity_profiler_summary import percentile
 from services.capacity_profiler_store import get_capacity_profiler_store
 from services.technical_history import (
     DEFAULT_RETENTION_DAYS,
@@ -27,10 +28,11 @@ def execute_diagnostic_query(query: str, params: dict | None = None) -> dict:
         since=since,
         limit=limit,
     )
+    summary = _summarize(samples)
     samples = _downsample(samples, MAX_RESPONSE_POINTS)
 
     return {
-        'schema_version': 1,
+        'schema_version': 2,
         'query': query,
         'source': 'agent_sqlite',
         'sample_interval_seconds': _positive_number(
@@ -42,6 +44,7 @@ def execute_diagnostic_query(query: str, params: dict | None = None) -> dict:
             DEFAULT_RETENTION_DAYS,
         ),
         'returned_points': len(samples),
+        'summary': summary,
         'samples': samples,
     }
 
@@ -87,6 +90,75 @@ def _downsample(samples: list[dict], target: int) -> list[dict]:
     }
 
     return [samples[index] for index in sorted(indexes)]
+
+
+def _summarize(samples: list[dict]) -> dict:
+    scalar_keys = (
+        'cpu_total_percent',
+        'cpu_core_max_percent',
+        'ram_percent',
+        'network_tx_mbps',
+        'network_rx_mbps',
+        'disk_read_kbps',
+        'disk_write_kbps',
+        'active_instances_count',
+        'total_connected_drivers',
+    )
+    summary = {
+        key: _distribution([
+            value
+            for sample in samples
+            if (value := _numeric(sample.get(key))) is not None
+        ])
+        for key in scalar_keys
+    }
+
+    per_core = [
+        sample.get('cpu_per_core')
+        for sample in samples
+        if isinstance(sample.get('cpu_per_core'), list)
+    ]
+    core_count = max((len(values) for values in per_core), default=0)
+    summary['cpu_per_core'] = [
+        {
+            'core': index + 1,
+            **(_distribution([
+                value
+                for values in per_core
+                if index < len(values)
+                and (value := _numeric(values[index])) is not None
+            ]) or {}),
+        }
+        for index in range(core_count)
+    ]
+
+    return summary
+
+
+def _distribution(values: list[float]) -> dict | None:
+    if not values:
+        return None
+
+    return {
+        'min': round(min(values), 2),
+        'mean': round(sum(values) / len(values), 2),
+        'p95': percentile(values, 95),
+        'max': round(max(values), 2),
+        'latest': round(values[-1], 2),
+        'count': len(values),
+    }
+
+
+def _numeric(value) -> float | None:
+    if isinstance(value, bool):
+        return None
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    return parsed
 
 
 def _positive_number(value, default: float) -> float:
