@@ -243,6 +243,7 @@ L'agent maintient une connexion WebSocket persistante vers chaque hub avec `webs
 |---|---|
 | `prepare_instance` | Ouvre les ports firewall |
 | `update_instance_network` | Remplace les règles firewall existantes |
+| `reset_instance_assignment` | Supprime la configuration courante, oublie le runtime et archive les anciens logs avant un changement d'organisation (refuse si l'instance tourne) |
 | `cleanup_instance` | Ferme les ports (refuse si l'instance tourne) |
 | `launch_instance` | Lance l'instance avec une config runtime fournie |
 | `start_instance` | Démarre avec la dernière config runtime en mémoire |
@@ -384,6 +385,7 @@ Le hub fournit l'instance complète dans le payload.
 ```text
 logs/
 ├── log_<instance_id>_YYYY-MM-DD_HH-MM-SS.log   # log par instance
+├── assignment-history/                         # anciens logs archivés lors d'une réattribution
 ├── result-spool/                                # manifests et copies résultat persistantes
 └── steam_update.log                              # log SteamCMD
 ```

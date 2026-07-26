@@ -238,6 +238,25 @@ def get_last_config(instance_id: str) -> dict:
     return {}
 
 
+def forget_instance_runtime(instance_id: str, logging_cfg: dict | None = None) -> bool:
+    info = _running.get(instance_id)
+    if info is not None:
+        if info['process'].poll() is None:
+            return False
+        process_supervisor.observe_exit(instance_id)
+
+    _last_config.pop(instance_id, None)
+    process_supervisor.forget(instance_id)
+
+    from services.player_count_observer import forget_player_count
+    forget_player_count(instance_id)
+
+    if logging_cfg:
+        _save_runtime_state_safe(logging_cfg)
+
+    return True
+
+
 def get_instance_status(instance_cfg: dict) -> dict:
     """Retourne le statut complet d'une instance."""
     instance_id = instance_cfg['id']

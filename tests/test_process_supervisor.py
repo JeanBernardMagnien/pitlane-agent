@@ -55,6 +55,19 @@ class ProcessSupervisorTest(unittest.TestCase):
         self.assertIsNone(terminal['stop_requested_at'])
         self.assertEqual(-1, terminal['exit_code'])
 
+    def test_forget_removes_only_a_terminated_instance(self):
+        supervisor = ProcessSupervisor()
+        supervisor.restore_terminated('stopped', {'instance': {'id': 'stopped'}})
+        supervisor.register('running', {
+            'process': _Process(),
+            'instance': {'id': 'running'},
+        })
+
+        self.assertTrue(supervisor.forget('stopped'))
+        self.assertIsNone(supervisor.terminal('stopped'))
+        self.assertFalse(supervisor.forget('running'))
+        self.assertIn('running', supervisor.running)
+
 
 if __name__ == '__main__':
     unittest.main()

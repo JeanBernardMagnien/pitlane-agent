@@ -37,6 +37,15 @@ def save_current_config(game_cfg: dict, instance_id: str, config: dict[str, Any]
     return write_json_atomic(current_config_path(game_cfg, instance_id), config)
 
 
+def delete_current_config(game_cfg: dict, instance_id: str) -> bool:
+    path = current_config_path(game_cfg, instance_id)
+    if not path.exists():
+        return False
+
+    path.unlink()
+    return True
+
+
 def save_launch_history_config(
     game_cfg: dict,
     launch_id: str | int | None,
