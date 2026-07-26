@@ -362,7 +362,7 @@ def build_runtime_report() -> dict:
             'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
         }
 
-    return {
+    report = {
         'agent': {
             'version': _agent_version(),
             'server_time': _utc_now(),
@@ -378,6 +378,11 @@ def build_runtime_report() -> dict:
         },
         'instances': _running_instance_reports(),
     }
+
+    from services.technical_history import safe_record_runtime_report
+    safe_record_runtime_report(report)
+
+    return report
 
 
 def runtime_report_signature(payload: dict) -> str:

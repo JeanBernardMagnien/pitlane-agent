@@ -269,6 +269,15 @@ complète utilisée par l'installateur ; aucun paquet `pip` supplémentaire n'es
 nécessaire. L'ancien `command_result` reste accepté uniquement pour la
 compatibilité avec un Hub antérieur pendant la migration.
 
+Les lectures de monitoring utilisent un contrat séparé
+`diagnostic_request`/`diagnostic_response`. Elles ne sont ni journalisées ni
+rejouées comme des mutations. La requête versionnée `technical_history` lit une
+tranche bornée de l'historique SQLite local : un point par minute et 30 jours de
+rétention par défaut, configurables avec
+`technical_history_interval_seconds` et `technical_history_retention_days`.
+Cette collecte continue reste indépendante des runs détaillés du Capacity
+Profiler.
+
 Le rapport runtime inclut les compteurs et la taille de ce journal. Son
 nettoyage reste conservateur : seuls les succès dont l'accusé terminal a été
 confirmé par le Hub depuis plus de 365 jours sont supprimés automatiquement au

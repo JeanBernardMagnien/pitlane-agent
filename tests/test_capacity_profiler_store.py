@@ -224,6 +224,53 @@ class CapacityProfilerStoreTest(unittest.TestCase):
         with temporary_directory:
             self.assertIsNone(store.latest_snapshot(999999))
 
+    def test_technical_history_returns_latest_window_in_chronological_order(self):
+        store, temporary_directory = _store()
+        with temporary_directory:
+            for minute in range(4):
+                store.insert_technical_history_snapshot({
+                    'captured_at': f'2026-07-24T12:0{minute}:00Z',
+                    'cpu_total_percent': 20.0 + minute,
+                    'active_instances_count': 2,
+                    'total_connected_drivers': minute,
+                    'instances': [{
+                        'id': 'server1',
+                        'cpu_percent': 10.0 + minute,
+                        'connected_drivers': minute,
+                    }],
+                })
+
+            snapshots = store.list_technical_history(limit=2)
+
+            self.assertEqual(
+                ['2026-07-24T12:02:00Z', '2026-07-24T12:03:00Z'],
+                [snapshot['captured_at'] for snapshot in snapshots],
+            )
+            self.assertEqual('server1', snapshots[0]['instances'][0]['id'])
+            self.assertNotIn('instances_json', snapshots[0])
+
+    def test_technical_history_since_and_purge_are_bounded(self):
+        store, temporary_directory = _store()
+        with temporary_directory:
+            for minute in range(3):
+                store.insert_technical_history_snapshot({
+                    'captured_at': f'2026-07-24T12:0{minute}:00Z',
+                    'instances': [],
+                })
+
+            snapshots = store.list_technical_history(
+                since='2026-07-24T12:01:00Z',
+                limit=10,
+            )
+            purged = store.purge_technical_history(
+                before='2026-07-24T12:02:00Z',
+                limit=1,
+            )
+
+            self.assertEqual(2, len(snapshots))
+            self.assertEqual(1, purged)
+            self.assertEqual(2, len(store.list_technical_history(limit=10)))
+
     def test_get_settings_seeds_defaults_from_config_on_first_call(self):
         store, temporary_directory = _store()
         with temporary_directory:

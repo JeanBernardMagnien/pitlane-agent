@@ -13,6 +13,7 @@ from services.agent_command_journal import (
     get_agent_command_journal,
 )
 from services.durable_command_executor import DurableCommandCoordinator
+from services.diagnostic_queries import DiagnosticQueryError, execute_diagnostic_query
 from services.runtime_reporter import (
     _agent_token,
     _coerce_report_interval,
@@ -29,6 +30,7 @@ DEFAULT_WEBSOCKET_ENDPOINT = '/api/agent/ws'
 _client_threads: list[threading.Thread] = []
 _stop_event = threading.Event()
 _command_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix='hub-ws-command')
+_diagnostic_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix='hub-ws-diagnostic')
 _durable_coordinator = None
 _durable_coordinator_lock = threading.Lock()
 
@@ -126,6 +128,66 @@ def _handle_legacy_command(ws, send_lock: threading.Lock, message: dict) -> None
         ws,
         send_lock,
         command_id,
+        completed,
+    ))
+
+
+def _send_diagnostic_response(ws, send_lock: threading.Lock, request_id, future) -> None:
+    try:
+        payload = future.result()
+        response = {
+            'type': 'diagnostic_response',
+            'schema_version': 1,
+            'id': request_id,
+            'ok': True,
+            'payload': payload,
+        }
+    except DiagnosticQueryError as exc:
+        response = {
+            'type': 'diagnostic_response',
+            'schema_version': 1,
+            'id': request_id,
+            'ok': False,
+            'code': 'invalid_diagnostic_query',
+            'error': str(exc),
+        }
+    except Exception as exc:
+        response = {
+            'type': 'diagnostic_response',
+            'schema_version': 1,
+            'id': request_id,
+            'ok': False,
+            'code': 'diagnostic_query_failed',
+            'error': f'Lecture diagnostique impossible : {exc.__class__.__name__}',
+        }
+
+    try:
+        _send_json(ws, send_lock, response)
+    except Exception:
+        pass
+
+
+def _handle_diagnostic_request(ws, send_lock: threading.Lock, message: dict) -> None:
+    request_id = str(message.get('id') or '').strip()
+    query = str(message.get('query') or '').strip()
+    params = message.get('params') if isinstance(message.get('params'), dict) else {}
+
+    if int(message.get('schema_version') or 0) != 1 or not request_id or not query:
+        _send_json(ws, send_lock, {
+            'type': 'diagnostic_response',
+            'schema_version': 1,
+            'id': request_id or None,
+            'ok': False,
+            'code': 'invalid_diagnostic_request',
+            'error': 'Requête diagnostique invalide',
+        })
+        return
+
+    future = _diagnostic_executor.submit(execute_diagnostic_query, query, params)
+    future.add_done_callback(lambda completed: _send_diagnostic_response(
+        ws,
+        send_lock,
+        request_id,
         completed,
     ))
 
@@ -296,6 +358,8 @@ def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: s
             _handle_durable_command(ws, send_lock, hub_name, message)
         else:
             _handle_legacy_command(ws, send_lock, message)
+    elif message_type == 'diagnostic_request':
+        _handle_diagnostic_request(ws, send_lock, message)
     elif message_type == 'command_ack_confirmed':
         _confirm_command_ack(hub_name, message)
     elif message_type == 'ping':

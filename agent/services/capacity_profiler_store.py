@@ -40,6 +40,15 @@ def _decode_snapshot_row(row) -> dict:
     return snapshot
 
 
+def _decode_technical_history_row(row) -> dict:
+    snapshot = dict(row)
+    snapshot['instances'] = (
+        json.loads(snapshot['instances_json']) if snapshot.get('instances_json') else []
+    )
+    snapshot.pop('instances_json', None)
+    return snapshot
+
+
 def _coerce_non_negative_int(value, default: int) -> int:
     try:
         parsed = int(value)
@@ -269,6 +278,84 @@ class CapacityProfilerStore:
 
         return _decode_snapshot_row(row) if row else None
 
+    def insert_technical_history_snapshot(self, snapshot: dict) -> None:
+        with self._connection() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            connection.execute(
+                '''
+                INSERT INTO technical_history_snapshots (
+                    captured_at, cpu_total_percent, ram_used_mb, ram_total_mb,
+                    ram_percent, active_instances_count, total_connected_drivers,
+                    instances_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ''',
+                (
+                    snapshot.get('captured_at') or _utc_now(),
+                    snapshot.get('cpu_total_percent'),
+                    snapshot.get('ram_used_mb'),
+                    snapshot.get('ram_total_mb'),
+                    snapshot.get('ram_percent'),
+                    int(snapshot.get('active_instances_count') or 0),
+                    int(snapshot.get('total_connected_drivers') or 0),
+                    json.dumps(snapshot.get('instances') or []),
+                ),
+            )
+            connection.commit()
+
+    def list_technical_history(
+        self,
+        since: str | None = None,
+        limit: int = 720,
+    ) -> list[dict]:
+        limit = max(1, min(int(limit), 1440))
+        params: list = []
+        since_sql = ''
+        if since:
+            since_sql = 'WHERE captured_at >= ?'
+            params.append(since)
+        params.append(limit)
+
+        with self._connection() as connection:
+            rows = connection.execute(
+                f'''
+                SELECT * FROM (
+                    SELECT *
+                    FROM technical_history_snapshots
+                    {since_sql}
+                    ORDER BY captured_at DESC
+                    LIMIT ?
+                )
+                ORDER BY captured_at ASC
+                ''',
+                params,
+            ).fetchall()
+
+        return [_decode_technical_history_row(row) for row in rows]
+
+    def purge_technical_history(self, before: str, limit: int = 5000) -> int:
+        limit = max(1, min(int(limit), 5000))
+
+        with self._connection() as connection:
+            connection.execute('BEGIN IMMEDIATE')
+            rows = connection.execute(
+                '''
+                SELECT id
+                FROM technical_history_snapshots
+                WHERE captured_at < ?
+                ORDER BY captured_at ASC
+                LIMIT ?
+                ''',
+                (before, limit),
+            ).fetchall()
+            if rows:
+                connection.executemany(
+                    'DELETE FROM technical_history_snapshots WHERE id = ?',
+                    [(row['id'],) for row in rows],
+                )
+            connection.commit()
+
+        return len(rows)
+
     def get_settings(self) -> dict:
         with self._connection() as connection:
             row = connection.execute(
@@ -462,9 +549,24 @@ class CapacityProfilerStore:
                         stop_grace_seconds    INTEGER NOT NULL DEFAULT 60,
                         updated_at            TEXT NOT NULL
                     );
+
+                    CREATE TABLE IF NOT EXISTS technical_history_snapshots (
+                        id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                        captured_at              TEXT NOT NULL,
+                        cpu_total_percent        REAL NULL,
+                        ram_used_mb              REAL NULL,
+                        ram_total_mb             REAL NULL,
+                        ram_percent              REAL NULL,
+                        active_instances_count   INTEGER NOT NULL DEFAULT 0,
+                        total_connected_drivers  INTEGER NOT NULL DEFAULT 0,
+                        instances_json           TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_technical_history_captured_at
+                    ON technical_history_snapshots (captured_at);
                     '''
                 )
-                connection.execute('PRAGMA user_version = 2')
+                connection.execute('PRAGMA user_version = 3')
 
             self._schema_ready = True
 
