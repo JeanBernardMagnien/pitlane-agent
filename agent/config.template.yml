@@ -94,12 +94,8 @@ logging:
 
 # Capacity Profiler : mesure locale de charge réelle (CPU/RAM/réseau/disque et
 # par instance) pendant des runs de test, pour dimensionner les offres serveur.
-# Les runs restent locaux ; le Hub peut lire des tranches techniques bornées
-# via le canal WebSocket diagnostique.
+# Interface locale uniquement en V1, rien n'est envoyé au Hub.
 capacity_profiler:
-  # Historique continu léger utilisé par le Monitoring Hub, même hors run.
-  technical_history_interval_seconds: 60
-  technical_history_retention_days: 30
   # Cadence dédiée, découplée du runtime_scan_interval (0.5s) utilisé pour le
   # reporting hub temps réel : la profiling n'a pas besoin de résolution
   # sub-seconde, et une cadence plus grossière limite le bruit auto-corrélé
