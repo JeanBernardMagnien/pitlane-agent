@@ -4,11 +4,13 @@ from core import config_store
 from core.system_info import get_system_info
 from core.firewall import close_ports, open_ports
 from services.current_config_store import (
+    delete_current_config,
     load_current_config,
     save_current_config,
     save_launch_history_config,
 )
 from services.encode_config import encode_payload
+from services.instance_assignment_reset import archive_instance_logs
 from services.runtime_config_compiler import (
     InstancePortsOutOfSync,
     finalize_launch_config,
@@ -23,6 +25,7 @@ from services.result_pipeline import (
 from services.server_manager import (
     _running,
     already_executed_command,
+    forget_instance_runtime,
     restart_instance,
     start_instance,
     stop_instance,
@@ -164,6 +167,33 @@ def cleanup_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         response['fw_warnings'] = fw_errors
 
     return response, 200
+
+
+def reset_instance_assignment_command(instance_id: str, body: dict) -> tuple[dict, int]:
+    if instance_id in _running and _running[instance_id]['process'].poll() is None:
+        return _error("Arrêtez l'instance avant de modifier son attribution", 409)
+
+    if not forget_instance_runtime(instance_id, config_store.LOGGING_CFG):
+        return _error("Arrêtez l'instance avant de modifier son attribution", 409)
+
+    try:
+        current_config_removed = delete_current_config(
+            config_store.GAME_CFG,
+            instance_id,
+        )
+        archived_logs = archive_instance_logs(
+            config_store.LOGGING_CFG,
+            instance_id,
+        )
+    except OSError as exc:
+        return _error(f'Impossible de nettoyer les données de l’ancienne attribution : {exc}', 500)
+
+    return {
+        'status': 'assignment_reset',
+        'instance_id': instance_id,
+        'current_config_removed': current_config_removed,
+        'archived_logs': archived_logs,
+    }, 200
 
 
 def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
@@ -397,6 +427,7 @@ COMMANDS = {
     'update_network': update_instance_network_command,
     'cleanup_instance': cleanup_instance_command,
     'cleanup': cleanup_instance_command,
+    'reset_instance_assignment': reset_instance_assignment_command,
     'launch_instance': launch_instance_command,
     'launch_runtime_config': launch_instance_command,
     'launch': launch_instance_command,

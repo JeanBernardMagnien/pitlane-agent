@@ -13,6 +13,7 @@ from pathlib import Path
 import psutil
 
 from core import config_store
+from services import process_cpu_sampler
 from services.player_count_observer import observe_player_count, resolve_player_count
 from services.process_supervisor import process_supervisor
 from services.server_manager import terminal_process_payload
@@ -22,12 +23,10 @@ DEFAULT_REPORT_INTERVAL_SECONDS = 1
 DEFAULT_SCAN_INTERVAL_SECONDS = 0.5
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
-PROCESS_CPU_SAMPLE_INTERVAL_SECONDS = 0.9
 
 
 _reporter_thread = None
 _reporter_stop_event = threading.Event()
-_process_cpu_cache: dict[int, dict] = {}
 
 
 def _utc_now() -> str:
@@ -196,7 +195,7 @@ def _agent_token(hub_cfg: dict) -> str | None:
     return str(value).strip() if value not in (None, '') else None
 
 
-def _read_connected_drivers(http_port: int, timeout: float) -> dict:
+def read_connected_drivers(http_port: int, timeout: float) -> dict:
     started = time.perf_counter()
 
     try:
@@ -229,39 +228,6 @@ def _read_connected_drivers(http_port: int, timeout: float) -> dict:
             'http_duration_ms': duration_ms,
             'http_error': exc.__class__.__name__,
         }
-
-
-def _process_cpu_percent(pid: int, process: psutil.Process) -> float | None:
-    try:
-        now = time.monotonic()
-        cached = _process_cpu_cache.get(pid)
-
-        if cached:
-            process = cached.get('process') or process
-            sampled_at = float(cached.get('sampled_at') or 0)
-
-            if now - sampled_at < PROCESS_CPU_SAMPLE_INTERVAL_SECONDS:
-                return cached.get('value')
-        else:
-            process.cpu_percent(interval=None)
-            _process_cpu_cache[pid] = {
-                'process': process,
-                'sampled_at': now,
-                'value': None,
-            }
-            return None
-
-        value = _safe_float(process.cpu_percent(interval=None))
-        _process_cpu_cache[pid] = {
-            'process': process,
-            'sampled_at': now,
-            'value': value,
-        }
-
-        return value
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        _process_cpu_cache.pop(pid, None)
-        return None
 
 
 def _running_instance_reports() -> list[dict]:
@@ -303,13 +269,12 @@ def _running_instance_reports() -> list[dict]:
                 uptime_seconds = max(0, int(time.time() - started_ts))
 
             try:
-                cached = _process_cpu_cache.get(pid)
-                ps_proc = cached.get('process') if cached else psutil.Process(pid)
+                ps_proc = process_cpu_sampler.cached_process(pid) or psutil.Process(pid)
 
-                cpu_percent = _process_cpu_percent(pid, ps_proc)
+                cpu_percent = process_cpu_sampler.sample_cpu_percent(pid, ps_proc)
                 ram_mb = round(ps_proc.memory_info().private / 1024 / 1024, 1)
             except (psutil.NoSuchProcess, psutil.AccessDenied):
-                _process_cpu_cache.pop(pid, None)
+                process_cpu_sampler.forget(pid)
                 status = 'stopped'
                 pid = None
 
@@ -325,7 +290,7 @@ def _running_instance_reports() -> list[dict]:
 
         http_port = instance.get('http_port')
         if status == 'running':
-            http_observation = _read_connected_drivers(int(http_port), timeout) if http_port else {
+            http_observation = read_connected_drivers(int(http_port), timeout) if http_port else {
                 'http_connected_drivers': None,
                 'http_drivers_seen_at': None,
                 'http_ok': None,

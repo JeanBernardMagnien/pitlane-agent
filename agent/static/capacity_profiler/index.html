@@ -1,0 +1,668 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PitLane — Capacity Profiler</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --panel: #ffffff;
+    --border: #d9dce1;
+    --text: #1a1d21;
+    --muted: #5b6270;
+    --accent: #2563eb;
+
+    /* Statut (fixe, jamais réutilisé pour une série de données — palette validée CVD) */
+    --status-good: #0ca30c;
+    --status-warning: #fab219;
+    --status-serious: #ec835a;
+    --status-critical: #d03b3b;
+
+    /* Chrome des graphiques */
+    --chart-line: #2a78d6;
+    --chart-grid: #e1e0d9;
+    --chart-axis: #c3c2b7;
+    --chart-muted: #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --panel: #1d2025;
+      --border: #33373f;
+      --text: #e6e8eb;
+      --muted: #9aa1ad;
+      --accent: #60a5fa;
+      --chart-line: #3987e5;
+      --chart-grid: #2c2c2a;
+      --chart-axis: #383835;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--muted); font-weight: 600; }
+  .subtitle { color: var(--muted); margin: 0 0 24px; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 16px;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  .checkbox-row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 12px; color: var(--muted); }
+  .checkbox-row input { width: auto; }
+  .hint { color: var(--muted); font-size: 11px; margin: 4px 0 0; }
+  input, select {
+    width: 100%;
+    padding: 7px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 13px;
+  }
+  button {
+    margin-top: 14px;
+    padding: 9px 14px;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  button.stop { background: var(--status-critical); }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 12px;
+  }
+  .badge-OK { background: var(--status-good); color: #ffffff; }
+  .badge-WATCH { background: var(--status-warning); color: #0b0b0b; }
+  .badge-RISK { background: var(--status-serious); color: #0b0b0b; }
+  .badge-CRITICAL { background: var(--status-critical); color: #ffffff; }
+  .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-top: 14px; }
+  .metric { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px; }
+  .metric .value { font-size: 20px; font-weight: 700; }
+  .metric .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 14px; }
+  .chart-title { font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .chart-box { position: relative; }
+  svg.chart { width: 100%; height: auto; display: block; overflow: visible; }
+  .chart-grid { stroke: var(--chart-grid); stroke-width: 0.6; }
+  .chart-axis { stroke: var(--chart-axis); stroke-width: 0.6; }
+  .chart-tick { fill: var(--chart-muted); font-size: 7px; font-weight: 400; }
+  .chart-threshold-label { font-size: 6.5px; font-weight: 600; }
+  .chart-end-label { fill: var(--text); font-size: 8px; font-weight: 600; }
+  .chart-empty { fill: var(--muted); font-size: 8px; font-style: italic; }
+  .chart-crosshair { stroke: var(--chart-axis); stroke-width: 0.6; pointer-events: none; opacity: 0; }
+  .chart-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--text);
+    color: var(--panel);
+    font-size: 11px;
+    padding: 4px 7px;
+    border-radius: 5px;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translate(-50%, -100%);
+    z-index: 5;
+  }
+  .core-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(66px, 1fr)); gap: 8px; margin-top: 4px; }
+  .core-cell { background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 7px 9px; }
+  .core-cell .core-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 10px; color: var(--muted); margin-bottom: 6px; }
+  .core-cell .core-value { font-weight: 600; color: var(--text); font-size: 12px; }
+  .core-meter-track { height: 5px; border-radius: 3px; background: var(--border); overflow: hidden; }
+  .core-meter-fill { height: 100%; border-radius: 3px; }
+  .table-scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 480px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
+  .error { color: var(--status-critical); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Capacity Profiler</h1>
+<p class="subtitle">Mesure locale de charge réelle — agent uniquement, rien n'est envoyé au Hub.</p>
+
+<div class="grid">
+  <div class="panel" id="control-panel">
+    <h2>Run</h2>
+    <div id="start-form">
+      <label for="test_label">Étiquette du test</label>
+      <input id="test_label" placeholder="ex: Public Spa all cars">
+      <label for="track">Circuit</label>
+      <input id="track" placeholder="ex: spa">
+      <label for="allowed_cars_mode">Mode voitures autorisées</label>
+      <input id="allowed_cars_mode" placeholder="ex: ALL_CARS">
+      <label for="server_profile_type">Type de profil serveur</label>
+      <input id="server_profile_type" placeholder="ex: PUBLIC_OPEN">
+      <button id="start-btn">Démarrer un run</button>
+      <div class="error" id="start-error"></div>
+    </div>
+    <div id="active-run" style="display:none">
+      <div><span class="badge" id="live-badge">—</span> <strong id="live-label"></strong></div>
+      <p class="hint" id="live-machine"></p>
+      <label for="stop_reason">Motif d'arrêt</label>
+      <select id="stop_reason">
+        <option value="manual">Arrêt volontaire</option>
+        <option value="crash">Crash observé pendant le run</option>
+      </select>
+      <button class="stop" id="stop-btn">Arrêter le run</button>
+      <div class="error" id="stop-error"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="settings-panel">
+    <h2>Déclenchement automatique</h2>
+    <label class="checkbox-row">
+      <input type="checkbox" id="auto_start_enabled">
+      Démarrer/arrêter automatiquement selon le nombre de pilotes
+    </label>
+    <label for="driver_threshold">Seuil de pilotes (total serveur)</label>
+    <input type="number" id="driver_threshold" min="0" step="1">
+    <label for="start_grace_seconds">Délai avant démarrage (s)</label>
+    <input type="number" id="start_grace_seconds" min="0" step="1">
+    <label for="stop_grace_seconds">Délai avant arrêt (s)</label>
+    <input type="number" id="stop_grace_seconds" min="0" step="1">
+    <p class="hint">Un délai évite les démarrages/arrêts en rafale si le nombre de pilotes oscille autour du seuil. Un run démarré manuellement n'est jamais arrêté automatiquement.</p>
+    <button id="settings-save-btn">Enregistrer</button>
+    <div class="error" id="settings-error"></div>
+  </div>
+
+  <div class="panel">
+    <h2>État en direct</h2>
+    <div class="metrics">
+      <div class="metric"><div class="value" id="m-cpu-total">—</div><div class="label">CPU total %</div></div>
+      <div class="metric"><div class="value" id="m-cpu-core">—</div><div class="label">CPU cœur max %</div></div>
+      <div class="metric"><div class="value" id="m-ram">—</div><div class="label">RAM dispo %</div></div>
+      <div class="metric"><div class="value" id="m-drivers">—</div><div class="label">Pilotes</div></div>
+      <div class="metric"><div class="value" id="m-instances">—</div><div class="label">Instances</div></div>
+      <div class="metric"><div class="value" id="m-cpu-per-driver">—</div><div class="label">CPU % / pilote</div></div>
+      <div class="metric"><div class="value" id="m-net">—</div><div class="label">Réseau ↑/↓ MB/s</div></div>
+      <div class="metric"><div class="value" id="m-disk">—</div><div class="label">Disque L/E KB/s</div></div>
+    </div>
+    <p class="hint">CPU % / pilote = CPU total ÷ pilotes connectés — coût CPU marginal par pilote, indépendant du nombre de pilotes. Utile pour comparer des machines ou estimer le coût d'un pilote de plus.</p>
+  </div>
+</div>
+
+<div class="grid" style="margin-top:16px">
+  <div class="panel">
+    <h2>Répartition CPU par cœur (instant)</h2>
+    <div class="core-grid" id="core-grid"></div>
+    <p class="hint">Un cœur au-dessus du seuil rouge (95%) est le signe d'un plafond single-core, même si le CPU total semble encore correct.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Instances actives (instant)</h2>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>Instance</th><th>Pilotes</th><th>CPU %</th><th>RAM (MB)</th><th>Phase</th></tr></thead>
+        <tbody id="instances-body"></tbody>
+      </table>
+      <div class="empty" id="instances-empty" style="display:none">Aucune instance active.</div>
+    </div>
+  </div>
+</div>
+
+<div class="charts" style="margin-top:16px">
+  <div class="panel">
+    <div class="chart-title">CPU cœur max % (durée du run)</div>
+    <div class="chart-box" id="chart-cpu-box">
+      <svg class="chart" id="chart-cpu"></svg>
+      <div class="chart-tooltip" id="chart-cpu-tooltip"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="chart-title">RAM disponible % (durée du run)</div>
+    <div class="chart-box" id="chart-ram-box">
+      <svg class="chart" id="chart-ram"></svg>
+      <div class="chart-tooltip" id="chart-ram-tooltip"></div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="chart-title">Pilotes connectés (durée du run)</div>
+    <div class="chart-box" id="chart-drivers-box">
+      <svg class="chart" id="chart-drivers"></svg>
+      <div class="chart-tooltip" id="chart-drivers-tooltip"></div>
+    </div>
+  </div>
+</div>
+
+<div class="panel" style="margin-top:16px">
+  <h2>Runs précédents</h2>
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Début</th><th>Label</th><th>Durée</th><th>Max pilotes</th><th>Max instances</th>
+          <th>Risque</th><th>Facteur limitant</th><th>Crashes</th><th>Qualité</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+    <div class="empty" id="history-empty" style="display:none">Aucun run enregistré pour l'instant.</div>
+  </div>
+</div>
+
+<script>
+const POLL_MS = 5000;
+let activeRunId = null;
+
+// Miroir des seuils de core/capacity_profiler_constants.py — uniquement pour l'affichage,
+// la classification de risque autoritaire reste calculée côté agent.
+const CPU_CORE_THRESHOLDS = [
+  { value: 75, color: 'var(--status-warning)', label: '75' },
+  { value: 85, color: 'var(--status-serious)', label: '85' },
+  { value: 95, color: 'var(--status-critical)', label: '95' },
+];
+const RAM_THRESHOLDS = [
+  { value: 25, color: 'var(--status-warning)', label: '25' },
+  { value: 15, color: 'var(--status-serious)', label: '15' },
+];
+
+function el(id) { return document.getElementById(id); }
+
+async function api(path, options) {
+  const res = await fetch(path, options);
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ('HTTP ' + res.status));
+  return body;
+}
+
+function fmtDuration(seconds) {
+  if (seconds == null) return '—';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  return (h ? h + 'h' : '') + String(m).padStart(2, '0') + 'm' + String(s).padStart(2, '0') + 's';
+}
+
+function fmtTime(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleTimeString();
+}
+
+function ramAvailablePercent(snapshot, ramTotalMb) {
+  if (snapshot.ram_available_mb != null && ramTotalMb) {
+    return Math.round((snapshot.ram_available_mb / ramTotalMb) * 1000) / 10;
+  }
+  if (snapshot.ram_percent != null) {
+    return Math.round((100 - snapshot.ram_percent) * 10) / 10;
+  }
+  return null;
+}
+
+/* Interpolation Catmull-Rom -> Bézier : passe exactement par chaque point mesuré,
+   juste la jonction entre les points est courbe au lieu de segments droits anguleux. */
+function smoothPath(pts) {
+  if (pts.length < 2) return '';
+  if (pts.length === 2) {
+    return `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)} L${pts[1].x.toFixed(1)},${pts[1].y.toFixed(1)}`;
+  }
+  let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const p0 = pts[i - 1] || pts[i];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = p1.y + (p2.y - p0.y) / 6;
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = p2.y - (p3.y - p1.y) / 6;
+    d += ` C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2.x.toFixed(1)},${p2.y.toFixed(1)}`;
+  }
+  return d;
+}
+
+/* ---- Graphique en ligne : axe Y fixe ou auto, grille, seuils de risque, info-bulle ---- */
+function renderLineChart(svgEl, tooltipEl, points, valueKey, opts) {
+  const width = 360, height = 170;
+  const marginLeft = 30, marginRight = 10, marginTop = 12, marginBottom = 18;
+  const plotW = width - marginLeft - marginRight;
+  const plotH = height - marginTop - marginBottom;
+  const color = opts.color || 'var(--chart-line)';
+  const unit = opts.unit || '';
+  const thresholds = opts.thresholds || [];
+
+  svgEl.setAttribute('viewBox', `0 0 ${width} ${height}`);
+
+  const known = points.filter(p => p[valueKey] != null);
+  if (known.length < 2) {
+    svgEl.innerHTML = `<text x="${width / 2}" y="${height / 2}" text-anchor="middle" class="chart-empty">Pas encore assez de données</text>`;
+    if (tooltipEl) tooltipEl.style.opacity = 0;
+    return;
+  }
+
+  let yMin, yMax, yTicks;
+  if (opts.domain) {
+    [yMin, yMax] = opts.domain;
+    yTicks = opts.ticks;
+  } else {
+    const values = known.map(p => p[valueKey]);
+    const rawMax = Math.max(...values, 1);
+    yMin = 0;
+    yMax = Math.ceil(rawMax * 1.15 / 5) * 5 || 5;
+    yTicks = [0, Math.round(yMax / 2), yMax];
+  }
+
+  const xAt = i => marginLeft + (i / (points.length - 1)) * plotW;
+  const yAt = v => marginTop + plotH - ((v - yMin) / (yMax - yMin || 1)) * plotH;
+
+  let svg = '';
+
+  for (const t of yTicks) {
+    const y = yAt(t);
+    svg += `<line x1="${marginLeft}" y1="${y.toFixed(1)}" x2="${width - marginRight}" y2="${y.toFixed(1)}" class="chart-grid"/>`;
+    svg += `<text x="${marginLeft - 5}" y="${(y + 2.5).toFixed(1)}" text-anchor="end" class="chart-tick">${t}</text>`;
+  }
+
+  for (const th of thresholds) {
+    if (th.value < yMin || th.value > yMax) continue;
+    const y = yAt(th.value);
+    svg += `<line x1="${marginLeft}" y1="${y.toFixed(1)}" x2="${width - marginRight}" y2="${y.toFixed(1)}" stroke="${th.color}" stroke-width="0.75" stroke-dasharray="2,2"/>`;
+    svg += `<text x="${width - marginRight}" y="${(y - 2.5).toFixed(1)}" text-anchor="end" class="chart-threshold-label" fill="${th.color}">${th.label}</text>`;
+  }
+
+  const segments = [];
+  let current = [];
+  points.forEach((p, i) => {
+    const v = p[valueKey];
+    if (v == null) {
+      if (current.length) segments.push(current);
+      current = [];
+      return;
+    }
+    current.push({ x: xAt(i), y: yAt(v) });
+  });
+  if (current.length) segments.push(current);
+  const path = segments.map(seg => smoothPath(seg)).filter(Boolean).join(' ');
+  svg += `<path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+  let lastIdx = -1;
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (points[i][valueKey] != null) { lastIdx = i; break; }
+  }
+  if (lastIdx >= 0) {
+    const lastV = points[lastIdx][valueKey];
+    const x = xAt(lastIdx), y = yAt(lastV);
+    svg += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="${color}" stroke="var(--panel)" stroke-width="1.5"/>`;
+    const anchor = x > width - 60 ? 'end' : 'start';
+    const lx = anchor === 'end' ? x - 6 : x + 6;
+    svg += `<text x="${lx.toFixed(1)}" y="${(y - 7).toFixed(1)}" text-anchor="${anchor}" class="chart-end-label">${lastV}${unit}</text>`;
+  }
+
+  svg += `<line class="chart-axis" x1="${marginLeft}" y1="${marginTop + plotH}" x2="${width - marginRight}" y2="${marginTop + plotH}"/>`;
+  svg += `<line class="chart-crosshair" id="${svgEl.id}-crosshair" x1="0" y1="${marginTop}" x2="0" y2="${marginTop + plotH}"/>`;
+
+  svgEl.innerHTML = svg;
+
+  if (!tooltipEl) return;
+  const crosshair = el(`${svgEl.id}-crosshair`);
+
+  svgEl.onpointermove = (e) => {
+    const rect = svgEl.getBoundingClientRect();
+    const vbX = (e.clientX - rect.left) * (width / rect.width);
+    const ratio = Math.min(1, Math.max(0, (vbX - marginLeft) / plotW));
+    const idx = Math.round(ratio * (points.length - 1));
+    const point = points[idx];
+    if (!point || point[valueKey] == null) { tooltipEl.style.opacity = 0; crosshair.style.opacity = 0; return; }
+
+    const px = xAt(idx);
+    crosshair.setAttribute('x1', px.toFixed(1));
+    crosshair.setAttribute('x2', px.toFixed(1));
+    crosshair.style.opacity = 1;
+
+    tooltipEl.textContent = `${fmtTime(point.captured_at)} — ${point[valueKey]}${unit}`;
+    tooltipEl.style.left = (px / width * rect.width).toFixed(1) + 'px';
+    tooltipEl.style.top = (yAt(point[valueKey]) / height * rect.height - 6).toFixed(1) + 'px';
+    tooltipEl.style.opacity = 1;
+  };
+  svgEl.onpointerleave = () => {
+    tooltipEl.style.opacity = 0;
+    crosshair.style.opacity = 0;
+  };
+}
+
+/* ---- Cœurs CPU : une jauge compacte par cœur, se replie proprement quel que
+   soit le nombre de threads (contrairement à des barres qui s'écrasent). ---- */
+function renderCoreGrid(container, perCore) {
+  if (!perCore || !perCore.length) {
+    container.innerHTML = `<div class="empty">Pas de run actif</div>`;
+    return;
+  }
+
+  container.innerHTML = perCore.map((v, i) => {
+    const pct = Math.min(100, Math.max(0, v));
+    const status = v >= 95 ? 'critical' : v >= 85 ? 'serious' : v >= 75 ? 'warning' : 'good';
+    return `
+      <div class="core-cell">
+        <div class="core-head"><span>C${i}</span><span class="core-value">${v}%</span></div>
+        <div class="core-meter-track"><div class="core-meter-fill" style="width:${pct}%;background:var(--status-${status})"></div></div>
+      </div>`;
+  }).join('');
+}
+
+async function refreshCurrent() {
+  let status;
+  try {
+    status = await api('/api/capacity-profiler/runs/current');
+  } catch (e) {
+    return;
+  }
+
+  if (!status.active) {
+    activeRunId = null;
+    el('start-form').style.display = 'block';
+    el('active-run').style.display = 'none';
+    ['m-cpu-total', 'm-cpu-core', 'm-ram', 'm-drivers', 'm-instances', 'm-cpu-per-driver', 'm-net', 'm-disk'].forEach(id => el(id).textContent = '—');
+    renderCoreGrid(el('core-grid'), null);
+    el('instances-body').innerHTML = '';
+    el('instances-empty').style.display = 'block';
+    return;
+  }
+
+  activeRunId = status.run.id;
+  el('start-form').style.display = 'none';
+  el('active-run').style.display = 'block';
+  const originTag = status.run.start_reason === 'auto_threshold' ? ' (déclenché automatiquement)' : '';
+  el('live-label').textContent = (status.run.test_label || ('Run #' + status.run.id)) + originTag;
+  const machineBits = [
+    status.run.server_name,
+    status.run.cpu_model,
+    status.run.cpu_cores ? status.run.cpu_cores + ' cœurs' : null,
+    status.run.ram_total_mb ? Math.round(status.run.ram_total_mb / 1024) + ' Go RAM' : null,
+  ].filter(Boolean);
+  el('live-machine').textContent = machineBits.join(' · ');
+
+  const badge = el('live-badge');
+  badge.textContent = status.live_risk_level + (status.live_limiting_factor && status.live_limiting_factor !== 'none' ? ' · ' + status.live_limiting_factor : '');
+  badge.className = 'badge badge-' + status.live_risk_level;
+
+  const latest = status.latest_snapshot;
+  if (latest) {
+    el('m-cpu-total').textContent = latest.cpu_total_percent != null ? latest.cpu_total_percent + '%' : '—';
+    el('m-cpu-core').textContent = latest.cpu_core_max_percent != null ? latest.cpu_core_max_percent + '%' : '—';
+    const ramPct = ramAvailablePercent(latest, status.run.ram_total_mb);
+    el('m-ram').textContent = ramPct != null ? ramPct + '%' : '—';
+    el('m-drivers').textContent = latest.total_connected_drivers ?? '—';
+    el('m-instances').textContent = latest.active_instances_count ?? '—';
+    const drivers = latest.total_connected_drivers;
+    el('m-cpu-per-driver').textContent = (latest.cpu_total_percent != null && drivers)
+      ? (Math.round((latest.cpu_total_percent / drivers) * 100) / 100) + '%'
+      : '—';
+    const tx = latest.network_tx_mbps, rx = latest.network_rx_mbps;
+    el('m-net').textContent = (tx != null || rx != null) ? `${tx ?? '—'} / ${rx ?? '—'}` : '—';
+    const dr = latest.disk_read_kbps, dw = latest.disk_write_kbps;
+    el('m-disk').textContent = (dr != null || dw != null) ? `${dr ?? '—'} / ${dw ?? '—'}` : '—';
+
+    renderCoreGrid(el('core-grid'), latest.cpu_per_core);
+
+    const instances = latest.instances || [];
+    const tbody = el('instances-body');
+    tbody.innerHTML = '';
+    el('instances-empty').style.display = instances.length ? 'none' : 'block';
+    for (const inst of instances) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${inst.id ?? '—'}</td>
+        <td>${inst.connected_drivers ?? '—'}</td>
+        <td>${inst.process_cpu_percent ?? '—'}</td>
+        <td>${inst.process_ram_mb ?? '—'}</td>
+        <td>${inst.session_phase ?? '—'}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  try {
+    const snapshots = await api(`/api/capacity-profiler/runs/${activeRunId}/snapshots?limit=200`);
+    const ramTotalMb = status.run.ram_total_mb;
+    const withRam = snapshots.map(s => ({ ...s, ram_available_percent: ramAvailablePercent(s, ramTotalMb) }));
+
+    renderLineChart(el('chart-cpu'), el('chart-cpu-tooltip'), snapshots, 'cpu_core_max_percent', {
+      color: 'var(--chart-line)', unit: '%', domain: [0, 100], ticks: [0, 25, 50, 75, 100], thresholds: CPU_CORE_THRESHOLDS,
+    });
+    renderLineChart(el('chart-ram'), el('chart-ram-tooltip'), withRam, 'ram_available_percent', {
+      color: 'var(--chart-line)', unit: '%', domain: [0, 100], ticks: [0, 25, 50, 75, 100], thresholds: RAM_THRESHOLDS,
+    });
+    renderLineChart(el('chart-drivers'), el('chart-drivers-tooltip'), snapshots, 'total_connected_drivers', {
+      color: 'var(--chart-line)', unit: '',
+    });
+  } catch (e) {
+    // Silencieux : les graphiques restent simplement vides si l'appel échoue.
+  }
+}
+
+async function refreshHistory() {
+  let runs;
+  try {
+    runs = await api('/api/capacity-profiler/runs?limit=25');
+  } catch (e) {
+    return;
+  }
+
+  const tbody = el('history-body');
+  tbody.innerHTML = '';
+  el('history-empty').style.display = runs.length ? 'none' : 'block';
+
+  for (const run of runs) {
+    const tr = document.createElement('tr');
+    const badge = run.risk_level
+      ? `<span class="badge badge-${run.risk_level}">${run.risk_level}</span>`
+      : '—';
+    const quality = run.sample_quality != null ? Math.round(run.sample_quality * 100) + '%' : '—';
+    tr.innerHTML = `
+      <td>${run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</td>
+      <td>${run.test_label || '—'}</td>
+      <td>${fmtDuration(run.duration_seconds)}</td>
+      <td>${run.max_total_drivers ?? '—'}</td>
+      <td>${run.max_simultaneous_instances ?? '—'}</td>
+      <td>${badge}</td>
+      <td>${run.limiting_factor || '—'}</td>
+      <td>${run.crash_count ?? 0}</td>
+      <td>${quality}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+el('start-btn').addEventListener('click', async () => {
+  el('start-error').textContent = '';
+  try {
+    await api('/api/capacity-profiler/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        test_label: el('test_label').value || null,
+        track: el('track').value || null,
+        allowed_cars_mode: el('allowed_cars_mode').value || null,
+        server_profile_type: el('server_profile_type').value || null,
+      }),
+    });
+    await refreshCurrent();
+  } catch (e) {
+    el('start-error').textContent = e.message;
+  }
+});
+
+el('stop-btn').addEventListener('click', async () => {
+  el('stop-error').textContent = '';
+  if (!activeRunId) return;
+  try {
+    await api(`/api/capacity-profiler/runs/${activeRunId}/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stop_reason: el('stop_reason').value }),
+    });
+    await refreshCurrent();
+    await refreshHistory();
+  } catch (e) {
+    el('stop-error').textContent = e.message;
+  }
+});
+
+async function loadSettings() {
+  let settings;
+  try {
+    settings = await api('/api/capacity-profiler/settings');
+  } catch (e) {
+    return;
+  }
+  el('auto_start_enabled').checked = !!settings.auto_start_enabled;
+  el('driver_threshold').value = settings.driver_threshold;
+  el('start_grace_seconds').value = settings.start_grace_seconds;
+  el('stop_grace_seconds').value = settings.stop_grace_seconds;
+}
+
+el('settings-save-btn').addEventListener('click', async () => {
+  el('settings-error').textContent = '';
+  try {
+    await api('/api/capacity-profiler/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        auto_start_enabled: el('auto_start_enabled').checked,
+        driver_threshold: Number(el('driver_threshold').value),
+        start_grace_seconds: Number(el('start_grace_seconds').value),
+        stop_grace_seconds: Number(el('stop_grace_seconds').value),
+      }),
+    });
+    await loadSettings();
+  } catch (e) {
+    el('settings-error').textContent = e.message;
+  }
+});
+
+async function tick() {
+  await refreshCurrent();
+  await refreshHistory();
+}
+
+loadSettings();
+tick();
+setInterval(tick, POLL_MS);
+</script>
+
+</body>
+</html>

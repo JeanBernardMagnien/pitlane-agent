@@ -90,6 +90,13 @@ class ProcessSupervisor:
         with self._lock:
             return self.terminated.get(instance_id)
 
+    def forget(self, instance_id: str) -> bool:
+        with self._lock:
+            if instance_id in self.running:
+                return False
+
+            return self.terminated.pop(instance_id, None) is not None
+
     def snapshot_running(self) -> list[tuple[str, dict]]:
         with self._lock:
             return list(self.running.items())
@@ -100,4 +107,3 @@ class ProcessSupervisor:
 
 
 process_supervisor = ProcessSupervisor()
-
