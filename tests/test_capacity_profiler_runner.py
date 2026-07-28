@@ -1,3 +1,4 @@
+import json
 import tempfile
 import threading
 import time
@@ -120,6 +121,38 @@ class CapacityProfilerRunnerTest(unittest.TestCase):
 
     def test_current_status_is_none_without_an_active_run(self):
         self.assertIsNone(capacity_profiler_runner.current_status())
+
+    def test_history_exposes_exact_cpu_and_ram_peaks(self):
+        run = self.store.create_run({
+            'server_name': 'test-machine',
+            'ram_total_mb': 32000,
+        })
+        self.store.finalize_run(
+            run['id'],
+            '2026-07-24T12:10:00Z',
+            'completed',
+            'manual',
+            {
+                'cpu_core_max_p95': 88.8,
+                'ram_available_min': 25.0,
+                'summary_json': json.dumps({
+                    'cpu_core_max_percent': {
+                        'min': 40.0,
+                        'max': 96.4,
+                        'mean': 70.0,
+                        'count': 10,
+                    },
+                }),
+            },
+        )
+
+        history_run = capacity_profiler_runner.list_runs()[0]
+
+        self.assertEqual(96.4, history_run['cpu_core_peak_percent'])
+        self.assertEqual(25.0, history_run['ram_available_min_percent'])
+        self.assertEqual(75.0, history_run['ram_used_peak_percent'])
+        self.assertEqual(8000.0, history_run['ram_available_min_mb'])
+        self.assertEqual(24000.0, history_run['ram_used_peak_mb'])
 
     def test_run_auto_stops_after_max_duration_with_timeout_reason(self):
         with patch.object(

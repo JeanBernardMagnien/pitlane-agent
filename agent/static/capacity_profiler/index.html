@@ -136,6 +136,9 @@
   table { width: 100%; border-collapse: collapse; font-size: 12px; min-width: 480px; }
   th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
   th { color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  .history-metric { display: flex; flex-direction: column; }
+  .history-metric strong { color: var(--text); font-weight: 700; }
+  .history-metric small { color: var(--muted); font-size: 10px; }
   .empty { color: var(--muted); font-style: italic; padding: 8px 0; }
   .error { color: var(--status-critical); font-size: 12px; margin-top: 8px; }
 </style>
@@ -256,7 +259,7 @@
       <thead>
         <tr>
           <th>Début</th><th>Label</th><th>Durée</th><th>Max pilotes</th><th>Max instances</th>
-          <th>Risque</th><th>Facteur limitant</th><th>Crashes</th><th>Qualité</th>
+          <th>Pic cœur</th><th>Pic RAM</th><th>Risque</th><th>Facteur limitant</th><th>Crashes</th><th>Qualité</th>
         </tr>
       </thead>
       <tbody id="history-body"></tbody>
@@ -282,6 +285,17 @@ const RAM_THRESHOLDS = [
 ];
 
 function el(id) { return document.getElementById(id); }
+
+function fmtPercent(value) {
+  if (value == null) return '—';
+  return `${Math.round(Number(value) * 10) / 10}%`;
+}
+
+function fmtMemoryMb(value) {
+  if (value == null) return '—';
+  if (value >= 1024) return `${Math.round((value / 1024) * 10) / 10} Go`;
+  return `${Math.round(value)} Mo`;
+}
 
 async function api(path, options) {
   const res = await fetch(path, options);
@@ -572,12 +586,20 @@ async function refreshHistory() {
       ? `<span class="badge badge-${run.risk_level}">${run.risk_level}</span>`
       : '—';
     const quality = run.sample_quality != null ? Math.round(run.sample_quality * 100) + '%' : '—';
+    const cpuPeak = run.cpu_core_peak_percent != null
+      ? `<span class="history-metric"><strong>${fmtPercent(run.cpu_core_peak_percent)}</strong><small>P95 ${fmtPercent(run.cpu_core_max_p95)}</small></span>`
+      : '—';
+    const ramPeak = run.ram_used_peak_percent != null
+      ? `<span class="history-metric"><strong>${fmtMemoryMb(run.ram_used_peak_mb)} utilisés</strong><small>${fmtPercent(run.ram_used_peak_percent)} · ${fmtMemoryMb(run.ram_available_min_mb)} libres min.</small></span>`
+      : '—';
     tr.innerHTML = `
       <td>${run.started_at ? new Date(run.started_at).toLocaleString() : '—'}</td>
       <td>${run.test_label || '—'}</td>
       <td>${fmtDuration(run.duration_seconds)}</td>
       <td>${run.max_total_drivers ?? '—'}</td>
       <td>${run.max_simultaneous_instances ?? '—'}</td>
+      <td>${cpuPeak}</td>
+      <td>${ramPeak}</td>
       <td>${badge}</td>
       <td>${run.limiting_factor || '—'}</td>
       <td>${run.crash_count ?? 0}</td>

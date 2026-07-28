@@ -25,7 +25,7 @@ def _time_of_day(session: dict) -> dict:
         "hour": session['Hour'],
         "minute": session['Minute'],
         "second": 0,
-        "time_multiplier": 1,
+        "time_multiplier": session.get('TimeMultiplier', 1),
     }
 
 
