@@ -21,9 +21,11 @@ from services.runtime_reporter import (
     build_runtime_report,
     runtime_report_signature,
 )
+from services.websocket_inbox import drain_available_messages
 
 
 DEFAULT_WEBSOCKET_ENDPOINT = '/api/agent/ws'
+MAX_INBOUND_MESSAGES_PER_CYCLE = 100
 
 
 _client_threads: list[threading.Thread] = []
@@ -307,6 +309,24 @@ def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: s
             get_result_pipeline().spool.mark_notified(artifact_id, hub_name)
 
 
+def _receive_available_messages(
+    ws,
+    send_lock: threading.Lock,
+    hub_name: str,
+    limit: int = MAX_INBOUND_MESSAGES_PER_CYCLE,
+) -> int:
+    """Drain a bounded batch so runtime acknowledgements cannot starve commands."""
+    import websocket
+
+    return drain_available_messages(
+        ws,
+        lambda raw_message: _handle_message(ws, send_lock, hub_name, raw_message),
+        websocket.WebSocketTimeoutException,
+        websocket.WebSocketConnectionClosedException,
+        limit,
+    )
+
+
 def _find_hub_cfg(hub_name: str) -> dict | None:
     for hub_cfg in _enabled_hub_configs():
         if (hub_cfg.get('name') or 'hub') == hub_name:
@@ -399,15 +419,7 @@ def _run_hub_client(hub_name: str) -> None:
                     _send_pending_command_acknowledgements(ws, send_lock, hub_name)
                     next_command_ack_replay_at = now + 2
 
-                try:
-                    raw_message = ws.recv()
-                except websocket.WebSocketTimeoutException:
-                    continue
-
-                if raw_message is None:
-                    raise websocket.WebSocketConnectionClosedException()
-
-                _handle_message(ws, send_lock, hub_name, raw_message)
+                _receive_available_messages(ws, send_lock, hub_name)
 
         except Exception as exc:
             logging.warning('[hub-ws] Déconnecté de "%s" (%s): %s', hub_name, ws_url, exc)
