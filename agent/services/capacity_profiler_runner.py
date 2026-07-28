@@ -1,3 +1,4 @@
+import json
 import logging
 import platform
 import sqlite3
@@ -64,6 +65,46 @@ def _max_run_duration_seconds() -> float:
 
 def _store():
     return get_capacity_profiler_store()
+
+
+def _history_metrics(run: dict) -> dict:
+    """Expose les pics utiles au comparatif sans modifier le schéma SQLite.
+
+    Le maximum CPU exact vit déjà dans summary_json, tandis que le minimum de
+    RAM disponible est une colonne de run. Cette projection reste donc
+    compatible avec les historiques existants.
+    """
+    cpu_core_peak_percent = None
+    try:
+        summary = json.loads(run.get('summary_json') or '{}')
+        cpu_distribution = summary.get('cpu_core_max_percent') or {}
+        if cpu_distribution.get('max') is not None:
+            cpu_core_peak_percent = round(float(cpu_distribution['max']), 2)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+
+    ram_available_min_percent = run.get('ram_available_min')
+    ram_used_peak_percent = None
+    ram_available_min_mb = None
+    ram_used_peak_mb = None
+
+    if ram_available_min_percent is not None:
+        ram_available_min_percent = round(float(ram_available_min_percent), 2)
+        ram_used_peak_percent = round(100 - ram_available_min_percent, 2)
+
+        ram_total_mb = run.get('ram_total_mb')
+        if ram_total_mb is not None:
+            ram_available_min_mb = round(float(ram_total_mb) * ram_available_min_percent / 100, 1)
+            ram_used_peak_mb = round(float(ram_total_mb) - ram_available_min_mb, 1)
+
+    return {
+        **run,
+        'cpu_core_peak_percent': cpu_core_peak_percent,
+        'ram_available_min_percent': ram_available_min_percent,
+        'ram_available_min_mb': ram_available_min_mb,
+        'ram_used_peak_percent': ram_used_peak_percent,
+        'ram_used_peak_mb': ram_used_peak_mb,
+    }
 
 
 def start_run(meta: dict, start_reason: str = 'manual') -> tuple[dict, int]:
@@ -153,11 +194,12 @@ def current_status() -> dict | None:
 
 def list_runs(limit: int = 50, offset: int = 0) -> list[dict]:
     _maybe_run_maintenance()
-    return _store().list_runs(limit, offset)
+    return [_history_metrics(run) for run in _store().list_runs(limit, offset)]
 
 
 def get_run(run_id: int) -> dict | None:
-    return _store().get_run(run_id)
+    run = _store().get_run(run_id)
+    return _history_metrics(run) if run else None
 
 
 def list_snapshots(run_id: int, since: str | None = None, limit: int = 500) -> list[dict]:
