@@ -16,6 +16,7 @@ SESSION_CREATED_PATTERN = re.compile(
 TIMED_SESSION_STARTED_PATTERN = re.compile(r'\bOutplap split\b', re.IGNORECASE)
 RACE_STARTED_PATTERN = re.compile(r'\bsetSessionPhase\s+Session\s*$', re.IGNORECASE)
 CRASH_PATTERN = re.compile(r'\[(?:crash)\]|\bFatal error\b', re.IGNORECASE)
+SEASON_RESTART_PATTERN = re.compile(r'\bRestart Season\b', re.IGNORECASE)
 LOG_PLAYER_COUNT_FRESH_SECONDS = 30
 
 
@@ -55,6 +56,8 @@ class PlayerCountObserver:
                     'session_observed_at': None,
                     'sport_started_at': None,
                     'race_started_at': None,
+                    'season_restart_count': 0,
+                    'season_restart_observed_at': None,
                     'crash_detected_at': None,
                     'crash_message': None,
                     'log_observed_from_start': True,
@@ -71,6 +74,8 @@ class PlayerCountObserver:
                 'session_observed_at': state.get('session_observed_at'),
                 'sport_started_at': state.get('sport_started_at'),
                 'race_started_at': state.get('race_started_at'),
+                'season_restart_count': int(state.get('season_restart_count') or 0),
+                'season_restart_observed_at': state.get('season_restart_observed_at'),
                 'crash_detected_at': state.get('crash_detected_at'),
                 'crash_message': state.get('crash_message'),
                 'log_observed_from_start': bool(state.get('log_observed_from_start')),
@@ -115,6 +120,8 @@ class PlayerCountObserver:
                     session_observed_at=None,
                     sport_started_at=None,
                     race_started_at=None,
+                    season_restart_count=0,
+                    season_restart_observed_at=None,
                     crash_detected_at=None,
                     crash_message=None,
                     log_observed_from_start=False,
@@ -164,6 +171,10 @@ class PlayerCountObserver:
                 state['sport_started_at'] = state.get('sport_started_at') or timestamp
                 state['race_started_at'] = state.get('race_started_at') or timestamp
 
+            if SEASON_RESTART_PATTERN.search(stripped_line) is not None:
+                state['season_restart_count'] = int(state.get('season_restart_count') or 0) + 1
+                state['season_restart_observed_at'] = timestamp
+
             if CRASH_PATTERN.search(stripped_line) is not None:
                 state['crash_detected_at'] = timestamp
                 state['crash_message'] = stripped_line[-500:]
@@ -195,6 +206,8 @@ class PlayerCountObserver:
             'session_observed_at': None,
             'sport_started_at': None,
             'race_started_at': None,
+            'season_restart_count': 0,
+            'season_restart_observed_at': None,
             'crash_detected_at': None,
             'crash_message': None,
             'log_observed_from_start': False,

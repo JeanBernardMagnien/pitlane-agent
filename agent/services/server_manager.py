@@ -342,6 +342,8 @@ def terminal_process_payload(terminal: dict | None) -> dict:
         'session_observed_at': observation.get('session_observed_at'),
         'sport_started_at': observation.get('sport_started_at'),
         'race_started_at': observation.get('race_started_at'),
+        'season_restart_count': int(observation.get('season_restart_count') or 0),
+        'season_restart_observed_at': observation.get('season_restart_observed_at'),
         'first_driver_seen_at': observation.get('first_driver_seen_at'),
         'log_observed_from_start': bool(observation.get('log_observed_from_start')),
     }

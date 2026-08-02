@@ -286,6 +286,13 @@ la dernière ligne courte correspondante (`crash_message`). Cette donnée sert a
 diagnostic contrôlé du Hub ; elle ne déclenche aucune relance ni décision
 sportive dans l'agent.
 
+Le marqueur exact `Restart Season` est observé incrémentalement dans le même
+journal. Le rapport expose `season_restart_count` et
+`season_restart_observed_at` pour l'identité du processus courant. Il s'agit
+d'une observation de rebouclage de la saison entière, jamais d'une décision
+d'arrêt locale : le Hub reste seul responsable de sa corrélation à la tentative
+et au résultat Race avant d'émettre une commande.
+
 ### Pipeline de résultats
 
 À chaque lancement corrélé, l'agent crée un manifeste local puis scanne le

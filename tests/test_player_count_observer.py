@@ -117,6 +117,45 @@ class PlayerCountObserverTest(unittest.TestCase):
             self.assertTrue(started['race_started_at'].endswith('Z'))
             self.assertNotEqual(started['sport_started_at'], started['race_started_at'])
 
+    def test_tracks_each_explicit_season_restart_incrementally(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
+            log_path.write_text(
+                '[2026-07-17 12:00:01.000] [gameplay] [info] InstantRaceRemote Race created\n'
+                '[2026-07-17 12:00:02.000] [gameplay] [info] [SERVER] setSessionPhase Session\n',
+                encoding='utf-8',
+            )
+            observer = PlayerCountObserver()
+            runtime_info = {
+                'process': _Process(),
+                'started_at': 1.0,
+                'log_path': str(log_path),
+            }
+
+            before_restart = observer.observe('server3', runtime_info, temporary_directory)
+            self.assertEqual(0, before_restart['season_restart_count'])
+            self.assertIsNone(before_restart['season_restart_observed_at'])
+
+            with log_path.open('a', encoding='utf-8') as handle:
+                handle.write('[2026-07-17 12:01:08.090] [gameplay] [info] Restart Season\n')
+
+            first_restart = observer.observe('server3', runtime_info, temporary_directory)
+            repeated_observation = observer.observe('server3', runtime_info, temporary_directory)
+
+            self.assertEqual(1, first_restart['season_restart_count'])
+            self.assertTrue(first_restart['season_restart_observed_at'].endswith('Z'))
+            self.assertEqual(1, repeated_observation['season_restart_count'])
+
+            with log_path.open('a', encoding='utf-8') as handle:
+                handle.write('[2026-07-17 12:02:08.090] [gameplay] [info] Restart Season\n')
+
+            second_restart = observer.observe('server3', runtime_info, temporary_directory)
+            self.assertEqual(2, second_restart['season_restart_count'])
+            self.assertGreater(
+                second_restart['season_restart_observed_at'],
+                first_restart['season_restart_observed_at'],
+            )
+
     def test_empty_log_is_a_complete_observation_without_inventing_sport_start(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             log_path = Path(temporary_directory) / 'log_server3_2026-07-17_12-00-00.log'
