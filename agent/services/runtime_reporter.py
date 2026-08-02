@@ -336,6 +336,7 @@ def _game_observation_payload(observation: dict) -> dict:
         'first_driver_seen_at': observation.get('first_driver_seen_at'),
         'log_observed_from_start': bool(observation.get('log_observed_from_start')),
         'crash_detected_at': observation.get('crash_detected_at'),
+        'crash_message': observation.get('crash_message'),
     }
 
 
@@ -413,6 +414,7 @@ def runtime_report_signature(payload: dict) -> str:
                 'stop_requested_at': item.get('stop_requested_at'),
                 'stop_reason': item.get('stop_reason'),
                 'crash_detected_at': item.get('crash_detected_at'),
+                'crash_message': item.get('crash_message'),
             })
 
     comparable_instances.sort(key=lambda item: item['id'])

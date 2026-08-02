@@ -279,6 +279,13 @@ cette politique. La durée et la taille de lot peuvent être ajustées avec
 `command_journal_success_retention_days` et
 `command_journal_cleanup_limit`.
 
+Lorsqu'un processus se termine, le rapport conserve aussi sa cause demandée,
+son code et sa date de sortie ainsi que les faits de session observés dans les
+logs. Si l'observateur a reconnu un signal de crash, il joint son horodatage et
+la dernière ligne courte correspondante (`crash_message`). Cette donnée sert au
+diagnostic contrôlé du Hub ; elle ne déclenche aucune relance ni décision
+sportive dans l'agent.
+
 ### Pipeline de résultats
 
 À chaque lancement corrélé, l'agent crée un manifeste local puis scanne le

@@ -337,6 +337,7 @@ def terminal_process_payload(terminal: dict | None) -> dict:
         'stop_requested_at': terminal.get('stop_requested_at'),
         'stop_reason': terminal.get('stop_reason'),
         'crash_detected_at': observation.get('crash_detected_at'),
+        'crash_message': observation.get('crash_message'),
         'session_phase': observation.get('session_phase'),
         'session_observed_at': observation.get('session_observed_at'),
         'sport_started_at': observation.get('sport_started_at'),
