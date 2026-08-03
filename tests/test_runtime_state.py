@@ -48,6 +48,7 @@ class RuntimeStateIdentityTest(unittest.TestCase):
                     'process': process,
                     'instance': {'id': 'server3'},
                     'command_id': '4cf3a345-baa4-43af-a6f0-2f425da4a490',
+                    'runtime_policy': {'stop_on_season_restart': True},
                 },
             )]),
             patch.object(runtime_state.process_supervisor, 'snapshot_terminated', return_value=[]),
@@ -56,10 +57,14 @@ class RuntimeStateIdentityTest(unittest.TestCase):
             runtime_state.save_runtime_state({'logs_path': temporary_directory})
             payload = json.loads(path.read_text(encoding='utf-8'))
 
-        self.assertEqual(3, payload['schema_version'])
+        self.assertEqual(4, payload['schema_version'])
         self.assertEqual(
             '4cf3a345-baa4-43af-a6f0-2f425da4a490',
             payload['running']['server3']['command_id'],
+        )
+        self.assertEqual(
+            {'stop_on_season_restart': True},
+            payload['running']['server3']['runtime_policy'],
         )
 
     def test_restoration_rejects_reused_pid_with_different_creation_time(self):

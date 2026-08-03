@@ -16,6 +16,7 @@ from services.runtime_config_compiler import (
     finalize_launch_config,
 )
 from services.runtime_bundle import RuntimeBundleError, validate_runtime_bundle
+from services.runtime_policy import normalize_runtime_policy
 from services.runtime_reporter import build_runtime_report
 from services.result_pipeline import (
     purge_delivered_result_artifacts,
@@ -214,6 +215,7 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
         return _error('runtime_config requis')
 
     try:
+        runtime_policy = normalize_runtime_policy(body.get('runtime_policy'))
         runtime_bundle = body.get('runtime_bundle')
         announced_bundle_hash = body.get('runtime_bundle_hash')
         runtime_bundle_hash = None
@@ -273,6 +275,7 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
                 filename=f'launch-{launch_id or "manual"}',
                 before_start=lambda: register_result_launch(instance_id, launch_id, runtime_config),
                 command_id=command_id,
+                runtime_policy=runtime_policy,
             )
         else:
             register_result_launch(instance_id, launch_id, runtime_config)
@@ -284,6 +287,7 @@ def launch_instance_command(instance_id: str, body: dict) -> tuple[dict, int]:
                 seasondefinition_b64,
                 filename=f'launch-{launch_id or "manual"}',
                 command_id=command_id,
+                runtime_policy=runtime_policy,
             )
     except Exception as e:
         return _error(f'Erreur lancement ou collecte résultats : {e}')

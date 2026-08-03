@@ -37,7 +37,7 @@ def runtime_state_path(logging_cfg: dict) -> Path:
 def save_runtime_state(logging_cfg: dict) -> None:
     path = runtime_state_path(logging_cfg)
     payload = {
-        'schema_version': 3,
+        'schema_version': 4,
         'running': {},
         'terminated': {},
     }
@@ -62,6 +62,7 @@ def save_runtime_state(logging_cfg: dict) -> None:
             'stop_requested_at': info.get('stop_requested_at'),
             'stop_reason': info.get('stop_reason'),
             'game_observation': info.get('game_observation') or {},
+            'runtime_policy': info.get('runtime_policy') or {},
         }
 
     for instance_id, terminal in process_supervisor.snapshot_terminated():
@@ -121,6 +122,7 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
                 'stop_requested_at': info.get('stop_requested_at'),
                 'stop_reason': info.get('stop_reason'),
                 'game_observation': info.get('game_observation') or {},
+                'runtime_policy': info.get('runtime_policy') or {},
             })
             restored += 1
         except Exception:

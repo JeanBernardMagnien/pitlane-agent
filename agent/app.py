@@ -19,6 +19,7 @@ from services.hub_ws_client import start_hub_ws_clients
 from services.runtime_reporter import start_runtime_reporter
 from services.result_pipeline import start_result_pipeline
 from services.runtime_state import restore_runtime_state
+from services.season_restart_guard import start_season_restart_guard
 
 
 def _watch_config():
@@ -61,6 +62,7 @@ app = create_app()
 start_runtime_reporter()
 start_hub_ws_clients()
 start_result_pipeline()
+start_season_restart_guard()
 start_capacity_profiler_watcher()
 
 

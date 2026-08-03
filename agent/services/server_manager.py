@@ -1,6 +1,7 @@
 import subprocess
 import psutil
 import time
+import threading
 import urllib.request
 import json as _json
 from pathlib import Path
@@ -15,6 +16,13 @@ _running = process_supervisor.running
 # Survit au stop/crash — garde la dernière config connue par instance
 # { instance_id → { config, config_loaded_at } }
 _last_config = {}
+_instance_stop_locks: dict[str, threading.RLock] = {}
+_instance_stop_locks_guard = threading.Lock()
+
+
+def _instance_stop_lock(instance_id: str) -> threading.RLock:
+    with _instance_stop_locks_guard:
+        return _instance_stop_locks.setdefault(instance_id, threading.RLock())
 
 
 def _get_connected_drivers(http_port: int) -> int | None:
@@ -104,6 +112,7 @@ def start_instance(
     seasondefinition_b64,
     filename=None,
     command_id=None,
+    runtime_policy=None,
 ):
     instance_id = instance_cfg['id']
 
@@ -139,6 +148,7 @@ def start_instance(
         'stop_requested_at': None,
         'stop_reason': None,
         'game_observation': {},
+        'runtime_policy': dict(runtime_policy or {}),
     }
     process_supervisor.register(instance_id, runtime_info)
     if filename:
@@ -158,6 +168,15 @@ def stop_instance(
     reason: str = 'manual_stop',
 ) -> dict:
     """Arrête proprement une instance. La dernière config reste dans _last_config."""
+    with _instance_stop_lock(instance_id):
+        return _stop_instance_locked(instance_id, logging_cfg, reason)
+
+
+def _stop_instance_locked(
+    instance_id: str,
+    logging_cfg: dict | None,
+    reason: str,
+) -> dict:
     if instance_id not in _running:
         terminal = process_supervisor.terminal(instance_id)
         # Stop est une commande idempotente : si le premier accusé s'est perdu après la
@@ -206,7 +225,8 @@ def stop_instance(
 def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
                      logging_cfg: dict, serverconfig_b64: str,
                      seasondefinition_b64: str, filename: str | None = None,
-                     before_start=None, command_id: str | None = None) -> dict:
+                     before_start=None, command_id: str | None = None,
+                     runtime_policy: dict | None = None) -> dict:
     """Stop + Start en conservant le filename."""
     stop_instance(instance_id, logging_cfg, reason='preempted')
     if before_start:
@@ -220,6 +240,7 @@ def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
         seasondefinition_b64,
         filename=filename,
         command_id=command_id,
+        runtime_policy=runtime_policy,
     )
 
 

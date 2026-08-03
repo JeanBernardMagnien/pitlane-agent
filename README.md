@@ -288,10 +288,15 @@ sportive dans l'agent.
 
 Le marqueur exact `Restart Season` est observé incrémentalement dans le même
 journal. Le rapport expose `season_restart_count` et
-`season_restart_observed_at` pour l'identité du processus courant. Il s'agit
-d'une observation de rebouclage de la saison entière, jamais d'une décision
-d'arrêt locale : le Hub reste seul responsable de sa corrélation à la tentative
-et au résultat Race avant d'émettre une commande.
+`season_restart_observed_at` pour l'identité du processus courant. Pour chaque
+lancement officiel, le Hub joint la politique explicite
+`runtime_policy.stop_on_season_restart: true`. L'agent la persiste avec
+l'identité du processus et applique alors un arrêt local normal dès le marqueur,
+y compris pendant une coupure réseau ou après un redémarrage du service agent.
+L'agent est alors toujours propriétaire de l'arrêt physique sur ce marqueur ;
+le Hub reçoit les faits et reste responsable de leur corrélation à la tentative,
+du résultat sportif et d'une éventuelle relance. Sans cette autorisation —
+notamment pour un entraînement Event — le garde-fou est désactivé.
 
 ### Pipeline de résultats
 
