@@ -17,6 +17,7 @@ class SeasonRestartGuardTest(unittest.TestCase):
         return {
             'process': process,
             'runtime_policy': {'stop_on_season_restart': enabled},
+            'season_restart_guard_observed_count': 0,
         }
 
     def test_stops_once_after_confirmed_season_restart(self):
@@ -58,6 +59,63 @@ class SeasonRestartGuardTest(unittest.TestCase):
 
         self.assertEqual(0, guard.run_once())
         stop.assert_not_called()
+
+    def test_allows_each_covered_precompetitive_restart_once(self):
+        info = self._running_info()
+        observation = {
+            'season_restart_count': 1,
+            'season_restart_observed_at': '2026-08-03T19:03:06Z',
+            'session_phase': 'practice',
+            'sport_started_at': None,
+            'race_started_at': None,
+            'log_observed_from_start': True,
+        }
+        stop = MagicMock()
+        persist = MagicMock()
+        guard = SeasonRestartGuard(
+            lambda: [('server2', info)],
+            MagicMock(return_value=observation),
+            stop,
+            {},
+            persist=persist,
+        )
+
+        self.assertEqual(0, guard.run_once())
+        self.assertEqual(0, guard.run_once())
+        self.assertEqual(1, info['season_restart_guard_observed_count'])
+        persist.assert_called_once_with()
+        stop.assert_not_called()
+
+    def test_stops_only_on_new_restart_after_sport_started(self):
+        info = self._running_info()
+        observation = {
+            'season_restart_count': 1,
+            'season_restart_observed_at': '2026-08-03T19:03:06Z',
+            'session_phase': 'practice',
+            'sport_started_at': None,
+            'race_started_at': None,
+            'log_observed_from_start': True,
+        }
+        stop = MagicMock()
+        guard = SeasonRestartGuard(
+            lambda: [('server2', info)],
+            MagicMock(side_effect=lambda *_: dict(observation)),
+            stop,
+            {},
+        )
+
+        self.assertEqual(0, guard.run_once())
+        observation.update({
+            'session_phase': 'qualifying',
+            'sport_started_at': '2026-08-03T19:04:00Z',
+        })
+        self.assertEqual(0, guard.run_once())
+        observation.update({
+            'season_restart_count': 2,
+            'season_restart_observed_at': '2026-08-03T19:08:00Z',
+        })
+        self.assertEqual(1, guard.run_once())
+        stop.assert_called_once_with('server2', {}, reason='normal')
 
     def test_retries_after_transient_stop_error(self):
         info = self._running_info()

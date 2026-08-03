@@ -149,6 +149,7 @@ def start_instance(
         'stop_reason': None,
         'game_observation': {},
         'runtime_policy': dict(runtime_policy or {}),
+        'season_restart_guard_observed_count': 0,
     }
     process_supervisor.register(instance_id, runtime_info)
     if filename:

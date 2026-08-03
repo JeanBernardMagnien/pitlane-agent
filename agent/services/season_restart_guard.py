@@ -12,11 +12,12 @@ DEFAULT_GUARD_INTERVAL_SECONDS = 0.2
 class SeasonRestartGuard:
     """Applique hors réseau un arrêt local préautorisé par le Hub."""
 
-    def __init__(self, snapshot_running, observe, stop, logging_cfg: dict):
+    def __init__(self, snapshot_running, observe, stop, logging_cfg: dict, persist=None):
         self._snapshot_running = snapshot_running
         self._observe = observe
         self._stop = stop
         self._logging_cfg = logging_cfg
+        self._persist = persist
 
     def run_once(self) -> int:
         stopped = 0
@@ -39,10 +40,19 @@ class SeasonRestartGuard:
             )
             info['game_observation'] = observation
 
-            if (
-                int(observation.get('season_restart_count') or 0) < 1
-                or not observation.get('season_restart_observed_at')
-            ):
+            restart_count = int(observation.get('season_restart_count') or 0)
+            observed_count = int(info.get('season_restart_guard_observed_count') or 0)
+            if restart_count <= observed_count or not observation.get('season_restart_observed_at'):
+                continue
+
+            if self._can_continue_precompetitive(observation):
+                info['season_restart_guard_observed_count'] = restart_count
+                if self._persist is not None:
+                    self._persist()
+                logging.info(
+                    '[season-restart-guard] Restart Season précompétitif autorisé sur %s',
+                    instance_id,
+                )
                 continue
 
             # Réserver la décision avant l'arrêt rend la garde idempotente même
@@ -63,6 +73,15 @@ class SeasonRestartGuard:
 
         return stopped
 
+    @staticmethod
+    def _can_continue_precompetitive(observation: dict) -> bool:
+        return (
+            observation.get('log_observed_from_start') is True
+            and not observation.get('sport_started_at')
+            and not observation.get('race_started_at')
+            and not observation.get('crash_detected_at')
+        )
+
 
 _guard_thread = None
 _stop_event = threading.Event()
@@ -70,12 +89,14 @@ _stop_event = threading.Event()
 
 def _run_loop() -> None:
     from services.server_manager import stop_instance
+    from services.runtime_state import save_runtime_state
 
     guard = SeasonRestartGuard(
         process_supervisor.snapshot_running,
         observe_player_count,
         stop_instance,
         config_store.LOGGING_CFG,
+        persist=lambda: save_runtime_state(config_store.LOGGING_CFG),
     )
 
     while not _stop_event.is_set():

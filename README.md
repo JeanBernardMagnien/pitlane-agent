@@ -304,8 +304,13 @@ journal. Le rapport expose `season_restart_count` et
 `season_restart_observed_at` pour l'identité du processus courant. Pour chaque
 lancement officiel, le Hub joint la politique explicite
 `runtime_policy.stop_on_season_restart: true`. L'agent la persiste avec
-l'identité du processus et applique alors un arrêt local normal dès le marqueur,
-y compris pendant une coupure réseau ou après un redémarrage du service agent.
+l'identité du processus. Lorsque le journal est couvert depuis le démarrage et
+qu'aucune phase compétitive n'a commencé, un `Restart Season` reste autorisé :
+AC EVO peut revenir en Practice sur le même processus. Le compteur déjà accepté
+est persisté afin qu'un redémarrage du service agent ne le rejoue pas. Dès
+qu'une phase compétitive a commencé — ou si l'observation est incertaine — le
+marqueur suivant déclenche un arrêt local normal, y compris pendant une coupure
+réseau ou après un redémarrage du service agent.
 L'agent est alors toujours propriétaire de l'arrêt physique sur ce marqueur ;
 le Hub reçoit les faits et reste responsable de leur corrélation à la tentative,
 du résultat sportif et d'une éventuelle relance. Sans cette autorisation —

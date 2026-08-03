@@ -77,6 +77,9 @@ def save_runtime_state(logging_cfg: dict) -> None:
             'stop_reason': info.get('stop_reason'),
             'game_observation': info.get('game_observation') or {},
             'runtime_policy': info.get('runtime_policy') or {},
+            'season_restart_guard_observed_count': int(
+                info.get('season_restart_guard_observed_count') or 0
+            ),
         }
 
     for instance_id, terminal in process_supervisor.snapshot_terminated():
@@ -145,6 +148,9 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
                 'stop_reason': info.get('stop_reason'),
                 'game_observation': info.get('game_observation') or {},
                 'runtime_policy': info.get('runtime_policy') or {},
+                'season_restart_guard_observed_count': int(
+                    info.get('season_restart_guard_observed_count') or 0
+                ),
             })
             restored += 1
         except Exception:
