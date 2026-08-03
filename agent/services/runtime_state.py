@@ -7,6 +7,12 @@ import psutil
 from services.process_supervisor import process_supervisor
 
 
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+
+
 class RestoredProcess:
     def __init__(self, pid: int):
         self.pid = pid
@@ -99,8 +105,13 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
     for instance_id, info in running_payload.items():
         try:
             pid = int(info.get('pid'))
-            ps_process = _validated_process(pid, info, game_cfg)
+            ps_process, process_missing = _inspect_process(pid, info, game_cfg)
             if ps_process is None:
+                if process_missing:
+                    process_supervisor.restore_terminated(
+                        instance_id,
+                        _missing_process_terminal(instance_id, info),
+                    )
                 continue
 
             process = RestoredProcess(pid)
@@ -137,33 +148,73 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
 
 
 def _validated_process(pid: int, info: dict, game_cfg: dict | None) -> psutil.Process | None:
+    process, _ = _inspect_process(pid, info, game_cfg)
+    return process
+
+
+def _inspect_process(
+    pid: int,
+    info: dict,
+    game_cfg: dict | None,
+) -> tuple[psutil.Process | None, bool]:
+    """Retourne le processus validé et si sa disparition est certaine."""
     if not psutil.pid_exists(pid):
-        return None
+        return None, True
 
     try:
         process = psutil.Process(pid)
         if not process.is_running() or process.status() == psutil.STATUS_ZOMBIE:
-            return None
+            return None, True
 
         saved_create_time = info.get('process_create_time')
         if saved_create_time is not None and abs(float(saved_create_time) - float(process.create_time())) > 1.0:
-            return None
+            return None, True
 
         expected_executable = str(info.get('executable_path') or '').strip()
         actual_executable = _safe_executable_path(process)
         if expected_executable and actual_executable:
             if Path(expected_executable).resolve() != Path(actual_executable).resolve():
-                return None
+                return None, True
+        elif expected_executable:
+            return None, False
         elif game_cfg:
             expected_name = str(game_cfg.get('executable_name') or '').strip().lower()
             if expected_name and process.name().strip().lower() != expected_name:
-                return None
+                return None, True
         else:
-            return None
+            return None, False
 
-        return process
-    except (psutil.NoSuchProcess, psutil.AccessDenied, OSError, ValueError):
-        return None
+        return process, False
+    except psutil.NoSuchProcess:
+        return None, True
+    except (psutil.AccessDenied, OSError, ValueError):
+        return None, False
+
+
+def _missing_process_terminal(instance_id: str, info: dict) -> dict:
+    observed_at = _utc_now()
+    stop_reason = info.get('stop_reason')
+    observation = dict(info.get('game_observation') or {})
+    if not stop_reason:
+        observation['crash_detected_at'] = observation.get('crash_detected_at') or observed_at
+        observation['crash_message'] = observation.get('crash_message') or (
+            'Processus AC EVO suivi absent au redémarrage de l’agent.'
+        )
+
+    return {
+        'instance': info.get('instance') or {'id': instance_id, 'name': instance_id},
+        'started_at': info.get('started_at'),
+        'config': info.get('config'),
+        'config_loaded_at': info.get('config_loaded_at'),
+        'log_path': info.get('log_path'),
+        'process_create_time': info.get('process_create_time'),
+        'executable_path': info.get('executable_path'),
+        'stop_requested_at': info.get('stop_requested_at'),
+        'stop_reason': stop_reason,
+        'exit_code': None,
+        'exit_observed_at': observed_at,
+        'game_observation': observation,
+    }
 
 
 def _safe_executable_path(process: psutil.Process) -> str | None:

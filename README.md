@@ -286,6 +286,15 @@ la dernière ligne courte correspondante (`crash_message`). Cette donnée sert a
 diagnostic contrôlé du Hub ; elle ne déclenche aucune relance ni décision
 sportive dans l'agent.
 
+L'identité d'un processus suivi est persistée dans `runtime_state.json`. Au
+redémarrage de l'agent, le même PID n'est restauré que si son heure de création
+et son exécutable correspondent encore. Si le processus est certainement absent
+et qu'aucun arrêt n'avait été demandé, l'agent conserve une observation
+terminale avec `crash_detected_at` daté du constat au démarrage. Il ne fabrique
+ni code de sortie ni heure exacte de la coupure. Une identité inaccessible ou
+incertaine reste non qualifiée, afin de ne jamais transformer un doute Windows
+en faux crash.
+
 Le marqueur exact `Restart Season` est observé incrémentalement dans le même
 journal. Le rapport expose `season_restart_count` et
 `season_restart_observed_at` pour l'identité du processus courant. Pour chaque
