@@ -77,9 +77,7 @@ def save_runtime_state(logging_cfg: dict) -> None:
             'stop_reason': info.get('stop_reason'),
             'game_observation': info.get('game_observation') or {},
             'runtime_policy': info.get('runtime_policy') or {},
-            'season_restart_guard_observed_count': int(
-                info.get('season_restart_guard_observed_count') or 0
-            ),
+            'season_restart_guard_last_processed_count': _last_processed_restart_count(info),
         }
 
     for instance_id, terminal in process_supervisor.snapshot_terminated():
@@ -148,9 +146,7 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
                 'stop_reason': info.get('stop_reason'),
                 'game_observation': info.get('game_observation') or {},
                 'runtime_policy': info.get('runtime_policy') or {},
-                'season_restart_guard_observed_count': int(
-                    info.get('season_restart_guard_observed_count') or 0
-                ),
+                'season_restart_guard_last_processed_count': _last_processed_restart_count(info),
             })
             restored += 1
         except Exception:
@@ -250,6 +246,17 @@ def _nullable_float(value) -> float | None:
         return float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
+
+
+def _last_processed_restart_count(info: dict) -> int:
+    value = info.get('season_restart_guard_last_processed_count')
+    if value is None:
+        value = info.get('season_restart_guard_observed_count')
+
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
 
 
 def _boot_changed(previous: float | None, current: float | None) -> bool | None:

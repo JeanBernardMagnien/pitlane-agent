@@ -41,12 +41,12 @@ class SeasonRestartGuard:
             info['game_observation'] = observation
 
             restart_count = int(observation.get('season_restart_count') or 0)
-            observed_count = int(info.get('season_restart_guard_observed_count') or 0)
-            if restart_count <= observed_count or not observation.get('season_restart_observed_at'):
+            last_processed_count = int(info.get('season_restart_guard_last_processed_count') or 0)
+            if restart_count <= last_processed_count or not observation.get('season_restart_observed_at'):
                 continue
 
             if self._can_continue_precompetitive(observation):
-                info['season_restart_guard_observed_count'] = restart_count
+                info['season_restart_guard_last_processed_count'] = restart_count
                 if self._persist is not None:
                     self._persist()
                 logging.info(

@@ -17,7 +17,7 @@ class SeasonRestartGuardTest(unittest.TestCase):
         return {
             'process': process,
             'runtime_policy': {'stop_on_season_restart': enabled},
-            'season_restart_guard_observed_count': 0,
+            'season_restart_guard_last_processed_count': 0,
         }
 
     def test_stops_once_after_confirmed_season_restart(self):
@@ -82,7 +82,7 @@ class SeasonRestartGuardTest(unittest.TestCase):
 
         self.assertEqual(0, guard.run_once())
         self.assertEqual(0, guard.run_once())
-        self.assertEqual(1, info['season_restart_guard_observed_count'])
+        self.assertEqual(1, info['season_restart_guard_last_processed_count'])
         persist.assert_called_once_with()
         stop.assert_not_called()
 

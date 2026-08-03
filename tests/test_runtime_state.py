@@ -57,7 +57,7 @@ class RuntimeStateIdentityTest(unittest.TestCase):
                     'instance': {'id': 'server3'},
                     'command_id': '4cf3a345-baa4-43af-a6f0-2f425da4a490',
                     'runtime_policy': {'stop_on_season_restart': True},
-                    'season_restart_guard_observed_count': 1,
+                    'season_restart_guard_last_processed_count': 1,
                 },
             )]),
             patch.object(runtime_state.process_supervisor, 'snapshot_terminated', return_value=[]),
@@ -75,7 +75,7 @@ class RuntimeStateIdentityTest(unittest.TestCase):
             {'stop_on_season_restart': True},
             payload['running']['server3']['runtime_policy'],
         )
-        self.assertEqual(1, payload['running']['server3']['season_restart_guard_observed_count'])
+        self.assertEqual(1, payload['running']['server3']['season_restart_guard_last_processed_count'])
 
     def test_restoration_rejects_reused_pid_with_different_creation_time(self):
         process = _PsProcess(create_time=200.0)
@@ -199,6 +199,11 @@ class RuntimeStateIdentityTest(unittest.TestCase):
         })
 
         self.assertEqual('unknown', terminal['exit_origin'])
+
+    def test_legacy_guard_cursor_is_kept_during_upgrade(self):
+        self.assertEqual(2, runtime_state._last_processed_restart_count({
+            'season_restart_guard_observed_count': 2,
+        }))
 
 
 if __name__ == '__main__':
