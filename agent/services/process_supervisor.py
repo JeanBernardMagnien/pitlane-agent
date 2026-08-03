@@ -79,6 +79,7 @@ class ProcessSupervisor:
                 'stop_reason': info.get('stop_reason'),
                 'exit_code': exit_code,
                 'exit_observed_at': _utc_now(),
+                'exit_origin': 'process_exit',
                 'game_observation': dict(info.get('game_observation') or {}),
             }
             self.terminated[instance_id] = terminal

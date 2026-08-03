@@ -59,6 +59,7 @@ class ServerManagerProcessArgumentsTest(unittest.TestCase):
         payload = server_manager.terminal_process_payload({
             'exit_code': -1,
             'exit_observed_at': '2026-08-02T18:05:00Z',
+            'exit_origin': 'process_exit',
             'game_observation': {
                 'crash_detected_at': '2026-08-02T18:04:59Z',
                 'crash_message': '[crash] Fatal error while loading session',
@@ -67,6 +68,7 @@ class ServerManagerProcessArgumentsTest(unittest.TestCase):
 
         self.assertEqual('[crash] Fatal error while loading session', payload['crash_message'])
         self.assertEqual('2026-08-02T18:04:59Z', payload['crash_detected_at'])
+        self.assertEqual('process_exit', payload['exit_origin'])
 
     def setUp(self):
         self.executable = Path("C:/AC-EVO/AssettoCorsaEVOServer.exe")

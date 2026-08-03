@@ -415,6 +415,7 @@ def runtime_report_signature(payload: dict) -> str:
                 'log_observed_from_start': item.get('log_observed_from_start'),
                 'exit_code': item.get('exit_code'),
                 'exit_observed_at': item.get('exit_observed_at'),
+                'exit_origin': item.get('exit_origin'),
                 'stop_requested_at': item.get('stop_requested_at'),
                 'stop_reason': item.get('stop_reason'),
                 'crash_detected_at': item.get('crash_detected_at'),

@@ -13,6 +13,13 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
+def _system_boot_time() -> float | None:
+    try:
+        return float(psutil.boot_time())
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
 class RestoredProcess:
     def __init__(self, pid: int):
         self.pid = pid
@@ -43,7 +50,8 @@ def runtime_state_path(logging_cfg: dict) -> Path:
 def save_runtime_state(logging_cfg: dict) -> None:
     path = runtime_state_path(logging_cfg)
     payload = {
-        'schema_version': 4,
+        'schema_version': 5,
+        'system_boot_time': _system_boot_time(),
         'running': {},
         'terminated': {},
     }
@@ -101,6 +109,9 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
         terminated_payload = {}
 
     restored = 0
+    previous_boot_time = _nullable_float(payload.get('system_boot_time'))
+    current_boot_time = _system_boot_time()
+    machine_restarted = _boot_changed(previous_boot_time, current_boot_time)
 
     for instance_id, info in running_payload.items():
         try:
@@ -110,7 +121,7 @@ def restore_runtime_state(logging_cfg: dict, game_cfg: dict | None = None) -> in
                 if process_missing:
                     process_supervisor.restore_terminated(
                         instance_id,
-                        _missing_process_terminal(instance_id, info),
+                        _missing_process_terminal(instance_id, info, machine_restarted),
                     )
                 continue
 
@@ -191,7 +202,11 @@ def _inspect_process(
         return None, False
 
 
-def _missing_process_terminal(instance_id: str, info: dict) -> dict:
+def _missing_process_terminal(
+    instance_id: str,
+    info: dict,
+    machine_restarted: bool | None = None,
+) -> dict:
     observed_at = _utc_now()
     stop_reason = info.get('stop_reason')
     observation = dict(info.get('game_observation') or {})
@@ -213,8 +228,29 @@ def _missing_process_terminal(instance_id: str, info: dict) -> dict:
         'stop_reason': stop_reason,
         'exit_code': None,
         'exit_observed_at': observed_at,
+        'exit_origin': (
+            'machine_restart'
+            if machine_restarted is True
+            else 'process_missing_on_agent_start'
+            if machine_restarted is False
+            else 'unknown'
+        ),
         'game_observation': observation,
     }
+
+
+def _nullable_float(value) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _boot_changed(previous: float | None, current: float | None) -> bool | None:
+    if previous is None or current is None:
+        return None
+
+    return abs(previous - current) > 1.0
 
 
 def _safe_executable_path(process: psutil.Process) -> str | None:

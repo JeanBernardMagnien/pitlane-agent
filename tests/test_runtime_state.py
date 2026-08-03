@@ -65,7 +65,7 @@ class RuntimeStateIdentityTest(unittest.TestCase):
             runtime_state.save_runtime_state({'logs_path': temporary_directory})
             payload = json.loads(path.read_text(encoding='utf-8'))
 
-        self.assertEqual(4, payload['schema_version'])
+        self.assertEqual(5, payload['schema_version'])
         self.assertEqual(
             '4cf3a345-baa4-43af-a6f0-2f425da4a490',
             payload['running']['server3']['command_id'],
@@ -139,6 +139,7 @@ class RuntimeStateIdentityTest(unittest.TestCase):
             path = Path(temporary_directory) / 'runtime_state.json'
             path.write_text(json.dumps({
                 'schema_version': 4,
+                'system_boot_time': 100.0,
                 'running': {
                     'server2': {
                         'pid': 1234,
@@ -158,7 +159,10 @@ class RuntimeStateIdentityTest(unittest.TestCase):
                 'terminated': {},
             }), encoding='utf-8')
 
-            with patch.object(runtime_state.psutil, 'pid_exists', return_value=False):
+            with (
+                patch.object(runtime_state.psutil, 'pid_exists', return_value=False),
+                patch.object(runtime_state, '_system_boot_time', return_value=200.0),
+            ):
                 restored = runtime_state.restore_runtime_state({'logs_path': temporary_directory}, {})
 
             persisted = json.loads(path.read_text(encoding='utf-8'))
@@ -167,6 +171,7 @@ class RuntimeStateIdentityTest(unittest.TestCase):
         terminal = persisted['terminated']['server2']
         self.assertIsNone(terminal['exit_code'])
         self.assertIsNotNone(terminal['exit_observed_at'])
+        self.assertEqual('machine_restart', terminal['exit_origin'])
         self.assertEqual('practice', terminal['game_observation']['session_phase'])
         self.assertTrue(terminal['game_observation']['log_observed_from_start'])
         self.assertIsNotNone(terminal['game_observation']['crash_detected_at'])
@@ -178,11 +183,20 @@ class RuntimeStateIdentityTest(unittest.TestCase):
             'stop_requested_at': '2026-08-03T18:27:20Z',
             'stop_reason': 'normal',
             'game_observation': {'session_phase': 'race'},
-        })
+        }, machine_restarted=False)
 
         self.assertEqual('normal', terminal['stop_reason'])
+        self.assertEqual('process_missing_on_agent_start', terminal['exit_origin'])
         self.assertNotIn('crash_detected_at', terminal['game_observation'])
         self.assertNotIn('crash_message', terminal['game_observation'])
+
+    def test_missing_boot_marker_keeps_exit_origin_unknown(self):
+        terminal = runtime_state._missing_process_terminal('server2', {
+            'instance': {'id': 'server2'},
+            'game_observation': {},
+        })
+
+        self.assertEqual('unknown', terminal['exit_origin'])
 
 
 if __name__ == '__main__':

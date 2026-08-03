@@ -355,6 +355,7 @@ def terminal_process_payload(terminal: dict | None) -> dict:
     return {
         'exit_code': terminal.get('exit_code'),
         'exit_observed_at': terminal.get('exit_observed_at'),
+        'exit_origin': terminal.get('exit_origin'),
         'stop_requested_at': terminal.get('stop_requested_at'),
         'stop_reason': terminal.get('stop_reason'),
         'crash_detected_at': observation.get('crash_detected_at'),

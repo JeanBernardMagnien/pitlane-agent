@@ -286,11 +286,15 @@ la dernière ligne courte correspondante (`crash_message`). Cette donnée sert a
 diagnostic contrôlé du Hub ; elle ne déclenche aucune relance ni décision
 sportive dans l'agent.
 
-L'identité d'un processus suivi est persistée dans `runtime_state.json`. Au
+L'identité d'un processus suivi et l'heure de démarrage Windows sont persistées
+dans `runtime_state.json`. Au
 redémarrage de l'agent, le même PID n'est restauré que si son heure de création
 et son exécutable correspondent encore. Si le processus est certainement absent
 et qu'aucun arrêt n'avait été demandé, l'agent conserve une observation
-terminale avec `crash_detected_at` daté du constat au démarrage. Il ne fabrique
+terminale avec `crash_detected_at` daté du constat au démarrage. `exit_origin`
+distingue une sortie directement observée (`process_exit`), un redémarrage de
+la machine (`machine_restart`) et une disparition constatée au retour de
+l'agent sur le même démarrage Windows (`process_missing_on_agent_start`). Il ne fabrique
 ni code de sortie ni heure exacte de la coupure. Une identité inaccessible ou
 incertaine reste non qualifiée, afin de ne jamais transformer un doute Windows
 en faux crash.
