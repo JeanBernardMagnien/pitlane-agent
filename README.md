@@ -219,6 +219,7 @@ Si l'agent reste en boucle déconnexion/reconnexion, vérifier en priorité :
 - Remonte heartbeat, métriques CPU/RAM/processus et état des instances en temps réel
 - Ouvre/ferme les ports firewall sur demande du hub
 - Lance, arrête et redémarre les processus AC EVO
+- Attend brièvement la libération des ports d'une instance et refuse le lancement si un processus les occupe encore
 - Exécute SteamCMD pour les mises à jour et vérifications de build
 - Expose les logs des instances (REST + WebSocket streaming)
 

@@ -8,6 +8,11 @@ from pathlib import Path
 from datetime import datetime, timezone
 
 from services.process_supervisor import process_supervisor
+from services.instance_port_guard import (
+    InstancePortInspectionError,
+    PORT_RELEASE_TIMEOUT_SECONDS,
+    wait_for_instance_ports,
+)
 from services.server_process_command import build_process_args
 
 # { instance_id → { process, instance, started_at, config, config_loaded_at, log_file } }
@@ -116,9 +121,52 @@ def start_instance(
 ):
     instance_id = instance_cfg['id']
 
+    with _instance_stop_lock(instance_id):
+        return _start_instance_locked(
+            instance_cfg,
+            game_cfg,
+            logging_cfg,
+            serverconfig_b64,
+            seasondefinition_b64,
+            filename=filename,
+            command_id=command_id,
+            runtime_policy=runtime_policy,
+        )
+
+
+def _start_instance_locked(
+    instance_cfg,
+    game_cfg,
+    logging_cfg,
+    serverconfig_b64,
+    seasondefinition_b64,
+    filename=None,
+    command_id=None,
+    runtime_policy=None,
+):
+    instance_id = instance_cfg['id']
+
     if instance_id in _running:
         if _running[instance_id]['process'].poll() is None:
             return {'error': f"Instance {instance_id} déjà en cours d'exécution"}
+
+    try:
+        port_conflicts = wait_for_instance_ports(instance_cfg)
+    except InstancePortInspectionError as exc:
+        return {
+            'code': 'INSTANCE_PORT_INSPECTION_FAILED',
+            'error': str(exc),
+        }
+
+    if port_conflicts:
+        return {
+            'code': 'INSTANCE_PORTS_IN_USE',
+            'error': (
+                f"Instance {instance_id} non lancée : ses ports sont toujours occupés "
+                f"après {PORT_RELEASE_TIMEOUT_SECONDS:g} secondes."
+            ),
+            'port_conflicts': port_conflicts,
+        }
 
     exe_path = Path(game_cfg['install_path']) / game_cfg['executable_name']
     log_file = _open_log_file(instance_id, logging_cfg['logs_path'])
@@ -229,20 +277,21 @@ def restart_instance(instance_id: str, instance_cfg: dict, game_cfg: dict,
                      before_start=None, command_id: str | None = None,
                      runtime_policy: dict | None = None) -> dict:
     """Stop + Start en conservant le filename."""
-    stop_instance(instance_id, logging_cfg, reason='preempted')
-    if before_start:
-        before_start()
-    time.sleep(2)
-    return start_instance(
-        instance_cfg,
-        game_cfg,
-        logging_cfg,
-        serverconfig_b64,
-        seasondefinition_b64,
-        filename=filename,
-        command_id=command_id,
-        runtime_policy=runtime_policy,
-    )
+    with _instance_stop_lock(instance_id):
+        stop_instance(instance_id, logging_cfg, reason='preempted')
+        if before_start:
+            before_start()
+        time.sleep(2)
+        return start_instance(
+            instance_cfg,
+            game_cfg,
+            logging_cfg,
+            serverconfig_b64,
+            seasondefinition_b64,
+            filename=filename,
+            command_id=command_id,
+            runtime_policy=runtime_policy,
+        )
 
 
 def get_last_config(instance_id: str) -> dict:

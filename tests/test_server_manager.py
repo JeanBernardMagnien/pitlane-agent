@@ -1,7 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 AGENT_ROOT = Path(__file__).resolve().parents[1] / "agent"
@@ -54,6 +54,38 @@ class ServerManagerProcessArgumentsTest(unittest.TestCase):
 
         self.assertEqual('stopped', result['status'])
         self.assertTrue(result['already_stopped'])
+
+    def test_start_refuses_to_spawn_when_instance_ports_stay_in_use(self):
+        conflicts = [
+            {'protocol': 'TCP', 'port': 9700, 'pid': 9876},
+            {'protocol': 'UDP', 'port': 9700, 'pid': 9876},
+        ]
+
+        with (
+            patch.object(server_manager, 'wait_for_instance_ports', return_value=conflicts),
+            patch.object(server_manager.subprocess, 'Popen') as mocked_popen,
+            patch.object(server_manager, '_open_log_file') as mocked_open_log,
+        ):
+            result = server_manager.start_instance(
+                {
+                    'id': 'server1',
+                    'tcp_port': 9700,
+                    'udp_port': 9700,
+                    'http_port': 8081,
+                },
+                {
+                    'install_path': 'C:/AC-EVO',
+                    'executable_name': 'AssettoCorsaEVOServer.exe',
+                },
+                {'logs_path': 'C:/AC-EVO/logs'},
+                'server-config',
+                'season-definition',
+            )
+
+        self.assertEqual('INSTANCE_PORTS_IN_USE', result['code'])
+        self.assertEqual(conflicts, result['port_conflicts'])
+        mocked_popen.assert_not_called()
+        mocked_open_log.assert_not_called()
 
     def test_terminal_payload_keeps_short_crash_diagnostic(self):
         payload = server_manager.terminal_process_payload({
