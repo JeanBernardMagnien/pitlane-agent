@@ -279,6 +279,22 @@ class AgentCommandJournal:
 
         return [dict(row) for row in rows]
 
+    def incomplete_commands(self, hub_name: str, limit: int = 500) -> list[dict]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                '''
+                SELECT *
+                FROM agent_command
+                WHERE hub_name = ?
+                  AND status IN ('received', 'executing')
+                ORDER BY updated_at ASC
+                LIMIT ?
+                ''',
+                (hub_name, max(1, min(int(limit), 2000))),
+            ).fetchall()
+
+        return [dict(row) for row in rows]
+
     def payload(self, record: dict) -> dict:
         payload = json.loads(record.get('payload_json') or '{}')
         if not isinstance(payload, dict):

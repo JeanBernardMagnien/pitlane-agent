@@ -12,6 +12,12 @@ NON_REPLAYABLE_AFTER_INTERRUPTION = {
     'steam_update',
     'update_steam',
 }
+ACKNOWLEDGEMENT_RANK = {
+    'received': 0,
+    'executing': 1,
+    'succeeded': 2,
+    'failed': 2,
+}
 
 
 class DurableCommandCoordinator:
@@ -57,12 +63,22 @@ class DurableCommandCoordinator:
         after_terminal: TerminalCallback | None = None,
         limit: int = 100,
     ) -> int:
-        records = self.journal.pending_acknowledgements(hub_name, limit=limit)
+        records = {
+            str(record['command_id']): record
+            for record in [
+                *self.journal.pending_acknowledgements(hub_name, limit=limit),
+                *self.journal.incomplete_commands(hub_name, limit=limit),
+            ]
+        }.values()
         for record in records:
-            emit_ack(record, None)
             command_id = str(record['command_id'])
+            scheduled = self.is_scheduled(hub_name, command_id)
+            acknowledgement_rank = ACKNOWLEDGEMENT_RANK[str(record['status'])]
 
-            if record['status'] == 'received':
+            if not scheduled or int(record['confirmed_rank']) < acknowledgement_rank:
+                emit_ack(record, None)
+
+            if record['status'] == 'received' and not scheduled:
                 self._schedule(
                     hub_name,
                     record,
@@ -71,7 +87,7 @@ class DurableCommandCoordinator:
                 )
             elif (
                 record['status'] == 'executing'
-                and not self.is_scheduled(hub_name, command_id)
+                and not scheduled
             ):
                 if record['command_name'] in NON_REPLAYABLE_AFTER_INTERRUPTION:
                     failed = self.journal.mark_terminal(
@@ -96,7 +112,6 @@ class DurableCommandCoordinator:
                         emit_ack,
                         after_terminal or (lambda: None),
                     )
-
         return len(records)
 
     def is_scheduled(self, hub_name: str, command_id: str) -> bool:

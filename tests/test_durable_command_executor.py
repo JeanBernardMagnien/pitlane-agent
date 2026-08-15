@@ -128,6 +128,7 @@ class DurableCommandCoordinatorTest(unittest.TestCase):
             message = self._message(1)
             command, _ = journal.receive('local', message)
             journal.mark_executing('local', command['command_id'])
+            journal.confirm('local', command['command_id'], 'executing')
             payloads = []
 
             coordinator = DurableCommandCoordinator(
@@ -145,7 +146,31 @@ class DurableCommandCoordinatorTest(unittest.TestCase):
             )
 
             self.assertEqual('succeeded', journal.get('local', command['command_id'])['status'])
+            self.assertEqual(1, len(payloads))
             self.assertEqual(command['command_id'], payloads[0]['_pitlane_command_id'])
+
+    def test_confirmed_received_command_is_executed_after_restart(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            journal = AgentCommandJournal(Path(temporary_directory) / 'commands.sqlite3')
+            message = self._message(1)
+            command, _ = journal.receive('local', message)
+            journal.confirm('local', command['command_id'], 'received')
+            executions = []
+
+            coordinator = DurableCommandCoordinator(
+                journal,
+                lambda command_name, payload: (
+                    executions.append((command_name, payload)) or {'status': 'stopped'},
+                    200,
+                ),
+                executor=InlineExecutor(),
+            )
+
+            coordinator.replay_pending('local', lambda _record, _response: None)
+
+            self.assertEqual('succeeded', journal.get('local', command['command_id'])['status'])
+            self.assertEqual(1, len(executions))
+            self.assertEqual(command['command_id'], executions[0][1]['_pitlane_command_id'])
 
     def test_interrupted_steam_update_is_not_started_twice(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
