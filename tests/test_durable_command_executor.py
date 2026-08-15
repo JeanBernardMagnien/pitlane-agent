@@ -172,6 +172,45 @@ class DurableCommandCoordinatorTest(unittest.TestCase):
             self.assertEqual(1, len(executions))
             self.assertEqual(command['command_id'], executions[0][1]['_pitlane_command_id'])
 
+    def test_interrupted_command_superseded_by_newer_fence_is_not_replayed(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            journal = AgentCommandJournal(Path(temporary_directory) / 'commands.sqlite3')
+            interrupted, _ = journal.receive('local', self._message(1))
+            journal.mark_executing('local', interrupted['command_id'])
+            journal.confirm('local', interrupted['command_id'], 'executing')
+
+            newer, _ = journal.receive('local', self._message(2))
+            journal.mark_executing('local', newer['command_id'])
+            journal.mark_terminal(
+                'local',
+                newer['command_id'],
+                'succeeded',
+                {'status': 'stopped'},
+                200,
+            )
+            journal.confirm('local', newer['command_id'], 'succeeded')
+            executions = []
+
+            coordinator = DurableCommandCoordinator(
+                journal,
+                lambda command_name, payload: (
+                    executions.append((command_name, payload)) or {'status': 'stopped'},
+                    200,
+                ),
+                executor=InlineExecutor(),
+            )
+
+            coordinator.replay_pending('local', lambda _record, _response: None)
+
+            restored = journal.get('local', interrupted['command_id'])
+            self.assertEqual([], executions)
+            self.assertEqual('failed', restored['status'])
+            self.assertEqual('stale_fence', restored['error_code'])
+            self.assertEqual(
+                'stale_fence',
+                journal.response(restored)['code'],
+            )
+
     def test_interrupted_steam_update_is_not_started_twice(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             journal = AgentCommandJournal(Path(temporary_directory) / 'commands.sqlite3')

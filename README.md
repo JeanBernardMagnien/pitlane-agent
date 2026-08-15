@@ -268,8 +268,11 @@ rester concurrentes.
 
 Après un redémarrage de l'Agent, une commande durable restée `received` ou
 `executing` est reprise avec son même identifiant, même si le Hub avait déjà
-confirmé cet accusé intermédiaire. Les handlers idempotents récupèrent alors
-l'effet local existant ou terminent l'action sans créer une seconde instance.
+confirmé cet accusé intermédiaire. Avant toute mutation, son fence est comparé
+au dernier fence durable de la cible : une commande dépassée devient
+`failed/stale_fence` sans appeler son handler. Si elle est toujours courante,
+les handlers idempotents récupèrent l'effet local existant ou terminent l'action
+sans créer une seconde instance.
 
 SQLite est fourni par la bibliothèque standard de la distribution Python
 complète utilisée par l'installateur ; aucun paquet `pip` supplémentaire n'est

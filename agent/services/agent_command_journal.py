@@ -295,6 +295,24 @@ class AgentCommandJournal:
 
         return [dict(row) for row in rows]
 
+    def superseding_fence(self, hub_name: str, command_id: str) -> int | None:
+        with self._connection() as connection:
+            record = self._record(connection, hub_name, command_id)
+            last_fence = connection.execute(
+                '''
+                SELECT last_fence
+                FROM agent_command_fence
+                WHERE hub_name = ? AND target_key = ?
+                ''',
+                (hub_name, record['target_key']),
+            ).fetchone()
+
+        if last_fence is None:
+            return None
+
+        fence = int(last_fence['last_fence'])
+        return fence if fence > int(record['fence']) else None
+
     def payload(self, record: dict) -> dict:
         payload = json.loads(record.get('payload_json') or '{}')
         if not isinstance(payload, dict):

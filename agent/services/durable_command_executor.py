@@ -157,6 +157,33 @@ class DurableCommandCoordinator:
         try:
             record = self.journal.get(hub_name, command_id)
             with self._command_lock(str(record['target_key'])):
+                superseding_fence = self.journal.superseding_fence(hub_name, command_id)
+                if superseding_fence is not None:
+                    error_message = (
+                        f"Commande obsolète : fence {record['fence']} remplacé "
+                        f"par {superseding_fence}."
+                    )
+                    record = self.journal.mark_terminal(
+                        hub_name,
+                        command_id,
+                        'failed',
+                        {
+                            'code': 'stale_fence',
+                            'error': error_message,
+                            'superseding_fence': superseding_fence,
+                        },
+                        409,
+                        error_code='stale_fence',
+                        error_message=error_message,
+                    )
+                    try:
+                        emit_ack(record, self.journal.response(record))
+                        after_terminal()
+                    except Exception:
+                        # SQLite reste l'autorité locale ; l'accusé sera rejoué.
+                        pass
+                    return
+
                 record = self.journal.mark_executing(hub_name, command_id)
                 emit_ack(record, None)
 
