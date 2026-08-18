@@ -54,7 +54,6 @@ contracts/    copie générée du contrat d'échange — ne jamais éditer ici
 installers/   scripts PowerShell d'installation
 tools/        scripts de maintenance et de test
 tests/        suite de tests locale
-docs/         référence AC EVO non encore centralisée (voir ci-dessous)
 ```
 
-`docs/AC-EVO-Dedicated-Server-Doc.md` reste ici volontairement : une seconde copie divergente existe dans le dépôt `pitlane`, et chacune contient des informations que l'autre n'a pas. Les deux doivent être fusionnées avant qu'une source unique soit désignée. Ne supprimer ni écraser aucune des deux copies.
+La rétro-ingénierie du serveur dédié AC EVO n'est plus copiée ici : sa source unique est `../pitlane-docs/references/ac-evo/dedicated-server.md`, une référence lourde ouverte uniquement pour une tâche AC EVO.

@@ -1,10 +1,7 @@
 # Contrats hub-agent PitLane
 
-Ce dossier contient la copie agent des contrats versionnés dont la source canonique est le dossier `contracts/` du hub `pitlane`.
+**Copie générée — ne jamais éditer ici.** La source canonique est `contracts/agent/` dans le dépôt `pitlane` ; les fichiers de même nom doivent rester strictement identiques entre les deux dépôts.
 
-- Une modification incompatible crée une nouvelle version de fichier.
-- Le hub compatible est déployé avant l'agent émetteur.
-- Les exemples ne contiennent ni secret ni donnée personnelle.
-- Les fichiers portant le même nom doivent rester strictement identiques entre les deux dépôts.
+Règles d'ownership, de version et de compatibilité : `../pitlane-docs/repositories/pitlane/decisions/0003-agent-contract-ownership.md`.
 
-`result-artifact-available.v1` définit uniquement la notification légère. Le fichier brut sera transféré séparément par HTTP authentifié et idempotent.
+Les exemples ne contiennent ni secret ni donnée personnelle.
