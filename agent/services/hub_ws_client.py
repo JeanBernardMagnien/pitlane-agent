@@ -22,6 +22,7 @@ from services.runtime_reporter import (
     runtime_report_signature,
 )
 from services.websocket_inbox import drain_available_messages
+from services.websocket_authentication import ReconnectBackoff, await_hello_acknowledgement
 
 
 DEFAULT_WEBSOCKET_ENDPOINT = '/api/agent/ws'
@@ -342,7 +343,7 @@ def _run_hub_client(hub_name: str) -> None:
         return
 
     send_lock = threading.Lock()
-    backoff_seconds = 1
+    reconnect_backoff = ReconnectBackoff()
     last_ws_url = None
     was_waiting = False
 
@@ -375,13 +376,16 @@ def _run_hub_client(hub_name: str) -> None:
         ws = None
         try:
             ws = websocket.create_connection(ws_url, timeout=10)
-            ws.settimeout(min(scan_interval, 0.2))
-
             _send_json(ws, send_lock, {'type': 'hello', 'token': token})
+            await_hello_acknowledgement(ws)
+            ws.settimeout(min(scan_interval, 0.2))
             last_signature = _send_runtime_report(ws, send_lock)
             logging.info('[hub-ws] Connecté à "%s"', hub_name)
 
-            backoff_seconds = 1
+            # Une ouverture TCP/WebSocket suivie d'un refus d'authentification
+            # n'est pas une reconnexion réussie et ne doit pas réinitialiser le
+            # backoff. Seul hello_ack rend la connexion exploitable.
+            reconnect_backoff.reset_after_authentication()
             next_scan_at = time.monotonic() + scan_interval
             next_report_at = time.monotonic() + interval
             next_config_check_at = time.monotonic() + 5
@@ -423,8 +427,7 @@ def _run_hub_client(hub_name: str) -> None:
 
         except Exception as exc:
             logging.warning('[hub-ws] Déconnecté de "%s" (%s): %s', hub_name, ws_url, exc)
-            _stop_event.wait(backoff_seconds)
-            backoff_seconds = min(backoff_seconds * 2, 30)
+            _stop_event.wait(reconnect_backoff.next_failure_delay())
         finally:
             if ws is not None:
                 try:
