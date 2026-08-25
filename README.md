@@ -2,7 +2,7 @@
 
 Agent léger installé sur chaque serveur Windows dédié Assetto Corsa EVO.
 
-Il s'enregistre auprès du serveur PitLane via WebSocket, exécute les commandes reçues (démarrage/arrêt d'instances, gestion du firewall, mises à jour SteamCMD) et remonte en temps réel les métriques serveur et l'état des instances.
+Il s'enregistre auprès du serveur PitLane via WebSocket, exécute les commandes reçues (démarrage/arrêt d'instances, gestion du firewall, mises à jour SteamCMD), synchronise l'état opérationnel à la connexion puis remonte ses changements sémantiques. Les métriques détaillées restent locales.
 
 Le serveur est propriétaire de toute la logique métier — serveurs, instances, ports, presets. L'agent exécute uniquement les effets techniques demandés et observe ce qui se passe réellement sur la machine.
 

@@ -1,7 +1,6 @@
 from pathlib import Path
 
 from core import config_store
-from core.system_info import get_system_info
 from core.firewall import close_ports, open_ports
 from services.current_config_store import (
     delete_current_config,
@@ -17,7 +16,6 @@ from services.runtime_config_compiler import (
 )
 from services.runtime_bundle import RuntimeBundleError, validate_runtime_bundle
 from services.runtime_policy import normalize_runtime_policy
-from services.runtime_reporter import build_runtime_report
 from services.result_pipeline import (
     purge_delivered_result_artifacts,
     register_result_launch,
@@ -455,12 +453,6 @@ def execute_agent_command(command: str, payload: dict | None = None) -> tuple[di
     payload = payload or {}
     if not isinstance(payload, dict):
         return _error('payload invalide')
-
-    if command in ('runtime_report', 'get_runtime_report'):
-        return build_runtime_report(), 200
-
-    if command in ('system_info', 'get_system_info'):
-        return get_system_info(), 200
 
     if command in ('steam_update_check', 'check_steam_update', 'update_steam_check'):
         return check_steam_update(config_store.CFG.get('steam', {}), payload)

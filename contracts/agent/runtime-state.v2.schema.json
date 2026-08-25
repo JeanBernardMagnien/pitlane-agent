@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pitlane.gg/contracts/agent/runtime-state.v2.schema.json",
+  "title": "PitLane Agent semantic runtime state v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "schema_version", "mode", "agent_boot_id", "runtime_revision", "payload"],
+  "properties": {
+    "type": { "const": "runtime_state" },
+    "schema_version": { "const": 2 },
+    "mode": { "enum": ["sync", "change"] },
+    "agent_boot_id": { "type": "string", "format": "uuid" },
+    "runtime_revision": { "type": "integer", "minimum": 1 },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "instances"],
+      "properties": {
+        "agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["version", "health", "health_reasons"],
+          "properties": {
+            "version": { "type": ["string", "null"] },
+            "health": { "enum": ["healthy", "degraded", "critical"] },
+            "health_reasons": { "type": "array", "items": { "type": "string" }, "uniqueItems": true }
+          }
+        },
+        "instances": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "status": { "type": "string", "minLength": 1 },
+              "pid": { "type": ["integer", "null"], "minimum": 0 },
+              "started_at": { "type": ["string", "null"], "format": "date-time" },
+              "connected_drivers": { "type": ["integer", "null"], "minimum": 0 },
+              "drivers_seen_at": { "type": ["string", "null"], "format": "date-time" },
+              "drivers_source": { "type": ["string", "null"] },
+              "drivers_conflict": { "type": "boolean" },
+              "drivers_zero_confirmed": { "type": "boolean" },
+              "log_connected_drivers": { "type": ["integer", "null"], "minimum": 0 },
+              "log_drivers_seen_at": { "type": ["string", "null"], "format": "date-time" },
+              "http_connected_drivers": { "type": ["integer", "null"], "minimum": 0 },
+              "http_ok": { "type": ["boolean", "null"] },
+              "http_error": { "type": ["string", "null"] },
+              "session_phase": { "type": ["string", "null"] },
+              "session_observed_at": { "type": ["string", "null"], "format": "date-time" },
+              "sport_started_at": { "type": ["string", "null"], "format": "date-time" },
+              "race_started_at": { "type": ["string", "null"], "format": "date-time" },
+              "season_restart_count": { "type": "integer", "minimum": 0 },
+              "season_restart_observed_at": { "type": ["string", "null"], "format": "date-time" },
+              "first_driver_seen_at": { "type": ["string", "null"], "format": "date-time" },
+              "log_observed_from_start": { "type": "boolean" },
+              "exit_code": { "type": ["integer", "null"] },
+              "exit_observed_at": { "type": ["string", "null"], "format": "date-time" },
+              "exit_origin": { "type": ["string", "null"] },
+              "stop_requested_at": { "type": ["string", "null"], "format": "date-time" },
+              "stop_reason": { "type": ["string", "null"] },
+              "crash_detected_at": { "type": ["string", "null"], "format": "date-time" },
+              "crash_message": { "type": ["string", "null"] }
+            },
+            "additionalProperties": false
+          }
+        }
+      }
+    }
+  }
+}

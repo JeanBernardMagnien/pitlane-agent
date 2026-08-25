@@ -42,3 +42,13 @@ def await_hello_acknowledgement(ws) -> dict:
         raise HubAuthenticationError(f'authentification refusee ({code})')
 
     raise HubAuthenticationError('hello_ack absent')
+
+
+def require_event_driven_runtime(acknowledgement: dict) -> None:
+    capabilities = acknowledgement.get('capabilities')
+    if (
+        acknowledgement.get('runtime_protocol_version') != 2
+        or not isinstance(capabilities, list)
+        or 'event_driven_runtime_v2' not in capabilities
+    ):
+        raise HubAuthenticationError('Hub incompatible avec le runtime evenementiel v2')

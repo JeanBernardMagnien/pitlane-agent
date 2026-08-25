@@ -10,16 +10,13 @@ from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
-import psutil
-
 from core import config_store
-from services import process_cpu_sampler
 from services.player_count_observer import observe_player_count, resolve_player_count
 from services.process_supervisor import process_supervisor
 from services.server_manager import terminal_process_payload
+from services.runtime_state_tracker import semantic_state_signature
 
 
-DEFAULT_REPORT_INTERVAL_SECONDS = 1
 DEFAULT_SCAN_INTERVAL_SECONDS = 0.5
 DEFAULT_HTTP_TIMEOUT_SECONDS = 0.5
 DEFAULT_RUNTIME_REPORT_ENDPOINT = '/api/agent/runtime-report'
@@ -31,13 +28,6 @@ _reporter_stop_event = threading.Event()
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-
-
-def _safe_float(value):
-    try:
-        return round(float(value), 2)
-    except (TypeError, ValueError):
-        return None
 
 
 @lru_cache(maxsize=1)
@@ -73,15 +63,6 @@ def _normalize_version(value: str) -> str:
     return version
 
 
-def _coerce_report_interval(value) -> int:
-    try:
-        interval = int(value)
-    except (TypeError, ValueError):
-        interval = DEFAULT_REPORT_INTERVAL_SECONDS
-
-    return max(1, interval)
-
-
 def _coerce_scan_interval(value) -> float:
     try:
         interval = float(value)
@@ -114,7 +95,6 @@ def _configured_hubs() -> list[dict]:
             'required': legacy_hub.get('required', True),
             'base_url': legacy_hub.get('base_url'),
             'runtime_report_endpoint': legacy_hub.get('runtime_report_endpoint') or legacy_hub.get('state_endpoint'),
-            'runtime_report_interval': legacy_hub.get('runtime_report_interval') or legacy_hub.get('monitor_interval'),
             'runtime_scan_interval': legacy_hub.get('runtime_scan_interval') or legacy_hub.get('monitor_scan_interval'),
             'instance_http_timeout': legacy_hub.get('instance_http_timeout'),
             'agent_token': legacy_hub.get('agent_token') or legacy_hub.get('token'),
@@ -143,7 +123,6 @@ def _enabled_hub_configs() -> list[dict]:
             'required': bool(hub_cfg.get('required', False)),
             'base_url': hub_cfg.get('base_url'),
             'runtime_report_endpoint': hub_cfg.get('runtime_report_endpoint', DEFAULT_RUNTIME_REPORT_ENDPOINT),
-            'runtime_report_interval': _coerce_report_interval(hub_cfg.get('runtime_report_interval')),
             'runtime_scan_interval': _coerce_scan_interval(hub_cfg.get('runtime_scan_interval')),
             'instance_http_timeout': _coerce_http_timeout(hub_cfg.get('instance_http_timeout')),
             'agent_token': hub_cfg.get('agent_token', hub_cfg.get('token')),
@@ -160,11 +139,6 @@ def _http_report_hub_configs() -> list[dict]:
         hub_cfg for hub_cfg in _enabled_hub_configs()
         if hub_cfg.get('websocket_enabled', True) is False
     ]
-
-
-def _report_interval() -> int:
-    intervals = [hub_cfg['runtime_report_interval'] for hub_cfg in _enabled_hub_configs()]
-    return min(intervals) if intervals else DEFAULT_REPORT_INTERVAL_SECONDS
 
 
 def _scan_interval() -> float:
@@ -258,36 +232,18 @@ def _running_instance_reports() -> list[dict]:
         status = 'running' if poll is None else 'stopped'
         pid = proc.pid if poll is None else None
         started_at = None
-        uptime_seconds = None
-        cpu_percent = None
-        ram_mb = None
 
         if poll is None and pid:
             started_ts = info.get('started_at')
             if started_ts:
                 started_at = datetime.fromtimestamp(started_ts, tz=timezone.utc).isoformat().replace('+00:00', 'Z')
-                uptime_seconds = max(0, int(time.time() - started_ts))
-
-            try:
-                ps_proc = process_cpu_sampler.cached_process(pid) or psutil.Process(pid)
-
-                cpu_percent = process_cpu_sampler.sample_cpu_percent(pid, ps_proc)
-                ram_mb = round(ps_proc.memory_info().private / 1024 / 1024, 1)
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                process_cpu_sampler.forget(pid)
-                status = 'stopped'
-                pid = None
 
         report = {
             'id': instance_id,
             'status': status,
             'pid': pid,
             'started_at': started_at,
-            'uptime_seconds': uptime_seconds,
-            'cpu_percent': cpu_percent,
-            'ram_mb': ram_mb,
         }
-
         http_port = instance.get('http_port')
         if status == 'running':
             http_observation = read_connected_drivers(int(http_port), timeout) if http_port else {
@@ -313,16 +269,14 @@ def _running_instance_reports() -> list[dict]:
 
     for instance_id, terminal in process_supervisor.snapshot_terminated():
         instance = terminal.get('instance') or {}
-        reports.append({
+        report = {
             'id': instance_id,
             'status': 'stopped',
             'pid': None,
             'started_at': None,
-            'uptime_seconds': None,
-            'cpu_percent': None,
-            'ram_mb': None,
             **terminal_process_payload(terminal),
-        })
+        }
+        reports.append(report)
 
     return reports
 
@@ -342,11 +296,65 @@ def _game_observation_payload(observation: dict) -> dict:
     }
 
 
-def build_runtime_report() -> dict:
-    memory = psutil.virtual_memory()
-    cpu_cores = psutil.cpu_count(logical=False) or 1
-    cpu_threads = psutil.cpu_count(logical=True) or cpu_cores
+SEMANTIC_INSTANCE_FIELDS = (
+    'id',
+    'status',
+    'pid',
+    'started_at',
+    'connected_drivers',
+    'drivers_seen_at',
+    'drivers_source',
+    'drivers_conflict',
+    'drivers_zero_confirmed',
+    'log_connected_drivers',
+    'log_drivers_seen_at',
+    'http_connected_drivers',
+    'http_ok',
+    'http_error',
+    'session_phase',
+    'session_observed_at',
+    'sport_started_at',
+    'race_started_at',
+    'season_restart_count',
+    'season_restart_observed_at',
+    'first_driver_seen_at',
+    'log_observed_from_start',
+    'exit_code',
+    'exit_observed_at',
+    'exit_origin',
+    'stop_requested_at',
+    'stop_reason',
+    'crash_detected_at',
+    'crash_message',
+)
 
+
+def build_semantic_runtime_state() -> dict:
+    """Build the current Hub-facing facts without exporting diagnostic metrics."""
+    spool_usage, command_metrics = _runtime_health_sources()
+    health, health_reasons = _runtime_health(spool_usage, command_metrics)
+    instances = []
+
+    for instance in _running_instance_reports():
+        if not isinstance(instance, dict):
+            continue
+        instances.append({
+            field: instance.get(field)
+            for field in SEMANTIC_INSTANCE_FIELDS
+            if field in instance
+        })
+
+    return {
+        'agent': {
+            'version': _agent_version(),
+            'health': health,
+            'health_reasons': health_reasons,
+        },
+        'instances': instances,
+    }
+
+
+def _runtime_health_sources() -> tuple[dict, dict]:
     try:
         from services.result_pipeline import result_spool_usage
         spool_usage = result_spool_usage()
@@ -365,95 +373,36 @@ def build_runtime_report() -> dict:
             'reasons': [f'metrics_unavailable:{exc.__class__.__name__}'],
         }
 
-    return {
-        'agent': {
-            'version': _agent_version(),
-            'server_time': _utc_now(),
-            'report_interval_seconds': _report_interval(),
-            'cpu_cores': cpu_cores,
-            'cpu_threads': cpu_threads,
-            'cpu_percent': _safe_float(psutil.cpu_percent(interval=None)),
-            'ram_total_gb': round(memory.total / 1024 / 1024 / 1024, 2),
-            'ram_used_gb': round(memory.used / 1024 / 1024 / 1024, 2),
-            'ram_percent': _safe_float(memory.percent),
-            'result_spool': spool_usage,
-            'command_journal': command_metrics,
-        },
-        'instances': _running_instance_reports(),
-    }
+    return spool_usage, command_metrics
 
 
-def runtime_report_signature(payload: dict) -> str:
-    instances = payload.get('instances') if isinstance(payload, dict) else []
-    comparable_instances = []
+def _runtime_health(result_spool, command_journal) -> tuple[str, list[str]]:
+    statuses = []
+    reasons = []
 
-    if isinstance(instances, list):
-        for item in instances:
-            if not isinstance(item, dict):
-                continue
+    for source_name, source in (
+        ('result_spool', result_spool),
+        ('command_journal', command_journal),
+    ):
+        if not isinstance(source, dict):
+            statuses.append('unknown')
+            reasons.append(f'{source_name}_metrics_unavailable')
+            continue
 
-            comparable_instances.append({
-                'id': str(item.get('id') or ''),
-                'status': item.get('status'),
-                'pid': item.get('pid'),
-                'started_at': item.get('started_at'),
-                'connected_drivers': item.get('connected_drivers'),
-                'drivers_source': item.get('drivers_source'),
-                'drivers_conflict': item.get('drivers_conflict'),
-                'drivers_zero_confirmed': item.get('drivers_zero_confirmed'),
-                'log_connected_drivers': item.get('log_connected_drivers'),
-                'http_connected_drivers': item.get('http_connected_drivers'),
-                'http_ok': item.get('http_ok'),
-                'http_error': item.get('http_error'),
-                'session_phase': item.get('session_phase'),
-                'session_observed_at': item.get('session_observed_at'),
-                'sport_started_at': item.get('sport_started_at'),
-                'race_started_at': item.get('race_started_at'),
-                'season_restart_count': item.get('season_restart_count'),
-                'season_restart_observed_at': item.get('season_restart_observed_at'),
-                'first_driver_seen_at': item.get('first_driver_seen_at'),
-                'log_observed_from_start': item.get('log_observed_from_start'),
-                'exit_code': item.get('exit_code'),
-                'exit_observed_at': item.get('exit_observed_at'),
-                'exit_origin': item.get('exit_origin'),
-                'stop_requested_at': item.get('stop_requested_at'),
-                'stop_reason': item.get('stop_reason'),
-                'crash_detected_at': item.get('crash_detected_at'),
-                'crash_message': item.get('crash_message'),
-            })
+        statuses.append(str(source.get('status') or 'unknown').lower())
+        for reason in source.get('reasons') or []:
+            normalized = str(reason).strip()
+            if normalized:
+                reasons.append(normalized)
 
-    comparable_instances.sort(key=lambda item: item['id'])
+    if 'critical' in statuses:
+        health = 'critical'
+    elif any(status not in ('healthy', 'ok') for status in statuses):
+        health = 'degraded'
+    else:
+        health = 'healthy'
 
-    agent = payload.get('agent') if isinstance(payload, dict) else {}
-    result_spool = agent.get('result_spool') if isinstance(agent, dict) else None
-    command_journal = agent.get('command_journal') if isinstance(agent, dict) else None
-    comparable_spool = None
-    if isinstance(result_spool, dict):
-        comparable_spool = {
-            'status': result_spool.get('status'),
-            'reasons': result_spool.get('reasons'),
-            'file_count': result_spool.get('file_count'),
-            'stored_bytes': result_spool.get('stored_bytes'),
-            'artifacts': result_spool.get('artifacts'),
-        }
-    comparable_command_journal = None
-    if isinstance(command_journal, dict):
-        comparable_command_journal = {
-            'status': command_journal.get('status'),
-            'reasons': command_journal.get('reasons'),
-            'total': command_journal.get('total'),
-            'statuses': command_journal.get('statuses'),
-            'pending_acknowledgements': command_journal.get('pending_acknowledgements'),
-            'stale_acknowledgements': command_journal.get('stale_acknowledgements'),
-            'purgeable_succeeded': command_journal.get('purgeable_succeeded'),
-            'database_bytes': command_journal.get('database_bytes'),
-        }
-
-    return json.dumps({
-        'instances': comparable_instances,
-        'result_spool': comparable_spool,
-        'command_journal': comparable_command_journal,
-    }, sort_keys=True, separators=(',', ':'))
+    return health, sorted(set(reasons))
 
 
 def _send_runtime_report_to_hub(hub_cfg: dict, payload: dict) -> bool:
@@ -497,9 +446,7 @@ def send_runtime_report() -> bool:
     if not hub_configs:
         return False
 
-    started = time.perf_counter()
-    payload = build_runtime_report()
-    payload['agent']['report_duration_ms'] = int((time.perf_counter() - started) * 1000)
+    payload = build_semantic_runtime_state()
 
     max_workers = min(len(hub_configs), 8)
     results = []
@@ -518,13 +465,24 @@ def send_runtime_report() -> bool:
 
 
 def _report_loop():
+    last_sent_signature_by_hub = {}
+
     while not _reporter_stop_event.is_set():
         try:
-            send_runtime_report()
+            payload = build_semantic_runtime_state()
+            signature = semantic_state_signature(payload)
+
+            for hub_cfg in _http_report_hub_configs():
+                hub_name = hub_cfg.get('name') or 'hub'
+                if last_sent_signature_by_hub.get(hub_name) == signature:
+                    continue
+
+                if _send_runtime_report_to_hub(hub_cfg, payload):
+                    last_sent_signature_by_hub[hub_name] = signature
         except Exception as exc:
             logging.error('[runtime-report] Erreur: %s', exc)
 
-        _reporter_stop_event.wait(_report_interval())
+        _reporter_stop_event.wait(_scan_interval())
 
 
 def start_runtime_reporter():
@@ -541,4 +499,7 @@ def start_runtime_reporter():
     _reporter_stop_event.clear()
     _reporter_thread = threading.Thread(target=_report_loop, daemon=True)
     _reporter_thread.start()
-    logging.info('[runtime-report] HTTP fallback activé toutes les %ss vers %d hub(s)', _report_interval(), len(hub_configs))
+    logging.info(
+        '[runtime-report] HTTP fallback événementiel activé vers %d hub(s)',
+        len(hub_configs),
+    )

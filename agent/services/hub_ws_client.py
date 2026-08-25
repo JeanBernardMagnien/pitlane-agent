@@ -15,14 +15,16 @@ from services.agent_command_journal import (
 from services.durable_command_executor import DurableCommandCoordinator
 from services.runtime_reporter import (
     _agent_token,
-    _coerce_report_interval,
     _coerce_scan_interval,
     _enabled_hub_configs,
-    build_runtime_report,
-    runtime_report_signature,
 )
+from services.runtime_state_session import RuntimeStateSession
 from services.websocket_inbox import drain_available_messages
-from services.websocket_authentication import ReconnectBackoff, await_hello_acknowledgement
+from services.websocket_authentication import (
+    ReconnectBackoff,
+    await_hello_acknowledgement,
+    require_event_driven_runtime,
+)
 
 
 DEFAULT_WEBSOCKET_ENDPOINT = '/api/agent/ws'
@@ -62,26 +64,13 @@ def _send_json(ws, send_lock: threading.Lock, payload: dict) -> None:
         ws.send(raw)
 
 
-def _build_runtime_report() -> dict:
-    started = time.perf_counter()
-    payload = build_runtime_report()
-    payload['agent']['report_duration_ms'] = int((time.perf_counter() - started) * 1000)
-
-    return payload
-
-
-def _send_runtime_report(ws, send_lock: threading.Lock, payload: dict | None = None) -> str:
-    payload = payload or _build_runtime_report()
-
-    _send_json(ws, send_lock, {
-        'type': 'runtime_report',
-        'payload': payload,
-    })
-
-    return runtime_report_signature(payload)
-
-
-def _send_command_result(ws, send_lock: threading.Lock, command_id, future) -> None:
+def _send_command_result(
+    ws,
+    send_lock: threading.Lock,
+    runtime_session: RuntimeStateSession,
+    command_id,
+    future,
+) -> None:
     try:
         payload, status_code = future.result()
         ok = 200 <= int(status_code) < 300
@@ -96,12 +85,17 @@ def _send_command_result(ws, send_lock: threading.Lock, command_id, future) -> N
             'ok': ok,
             'payload': payload,
         })
-        _send_runtime_report(ws, send_lock)
+        runtime_session.send_if_changed()
     except Exception:
         pass
 
 
-def _handle_legacy_command(ws, send_lock: threading.Lock, message: dict) -> None:
+def _handle_legacy_command(
+    ws,
+    send_lock: threading.Lock,
+    runtime_session: RuntimeStateSession,
+    message: dict,
+) -> None:
     command_id = message.get('id')
     command = message.get('command')
     payload = message.get('payload') or {}
@@ -128,6 +122,7 @@ def _handle_legacy_command(ws, send_lock: threading.Lock, message: dict) -> None
     future.add_done_callback(lambda completed: _send_command_result(
         ws,
         send_lock,
+        runtime_session,
         command_id,
         completed,
     ))
@@ -185,6 +180,7 @@ def _get_durable_coordinator() -> DurableCommandCoordinator:
 def _handle_durable_command(
     ws,
     send_lock: threading.Lock,
+    runtime_session: RuntimeStateSession,
     hub_name: str,
     message: dict,
 ) -> None:
@@ -195,7 +191,7 @@ def _handle_durable_command(
             hub_name,
             message,
             lambda record, response: _send_command_ack(ws, send_lock, record, response),
-            lambda: _send_runtime_report(ws, send_lock),
+            runtime_session.send_if_changed,
         )
     except StaleAgentCommand as exc:
         _send_json(ws, send_lock, {
@@ -247,13 +243,14 @@ def _confirm_command_ack(hub_name: str, message: dict) -> None:
 def _send_pending_command_acknowledgements(
     ws,
     send_lock: threading.Lock,
+    runtime_session: RuntimeStateSession,
     hub_name: str,
 ) -> None:
     try:
         _get_durable_coordinator().replay_pending(
             hub_name,
             lambda record, response: _send_command_ack(ws, send_lock, record, response),
-            lambda: _send_runtime_report(ws, send_lock),
+            runtime_session.send_if_changed,
             limit=100,
         )
     except Exception as exc:
@@ -283,7 +280,13 @@ def _send_artifact_notifications(
         logging.warning('[hub-ws] Notification résultats impossible pour "%s": %s', hub_name, exc)
 
 
-def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: str) -> None:
+def _handle_message(
+    ws,
+    send_lock: threading.Lock,
+    runtime_session: RuntimeStateSession,
+    hub_name: str,
+    raw_message: str,
+) -> None:
     try:
         message = json.loads(raw_message)
     except json.JSONDecodeError:
@@ -296,13 +299,17 @@ def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: s
 
     if message_type == 'command':
         if int(message.get('schema_version') or 1) >= 2:
-            _handle_durable_command(ws, send_lock, hub_name, message)
+            _handle_durable_command(ws, send_lock, runtime_session, hub_name, message)
         else:
-            _handle_legacy_command(ws, send_lock, message)
+            _handle_legacy_command(ws, send_lock, runtime_session, message)
     elif message_type == 'command_ack_confirmed':
         _confirm_command_ack(hub_name, message)
     elif message_type == 'ping':
         _send_json(ws, send_lock, {'type': 'pong'})
+    elif message_type == 'runtime_state_request':
+        runtime_session.send_sync()
+    elif message_type == 'runtime_state_ack':
+        pass
     elif message_type == 'result_artifact_available_ack':
         artifact_id = str(message.get('artifact_id') or '').strip()
         if artifact_id:
@@ -313,6 +320,7 @@ def _handle_message(ws, send_lock: threading.Lock, hub_name: str, raw_message: s
 def _receive_available_messages(
     ws,
     send_lock: threading.Lock,
+    runtime_session: RuntimeStateSession,
     hub_name: str,
     limit: int = MAX_INBOUND_MESSAGES_PER_CYCLE,
 ) -> int:
@@ -321,7 +329,7 @@ def _receive_available_messages(
 
     return drain_available_messages(
         ws,
-        lambda raw_message: _handle_message(ws, send_lock, hub_name, raw_message),
+        lambda raw_message: _handle_message(ws, send_lock, runtime_session, hub_name, raw_message),
         websocket.WebSocketTimeoutException,
         websocket.WebSocketConnectionClosedException,
         limit,
@@ -366,7 +374,6 @@ def _run_hub_client(hub_name: str) -> None:
             logging.info('[hub-ws] Hub "%s" de nouveau disponible', hub_name)
             was_waiting = False
 
-        interval = _coerce_report_interval(hub_cfg.get('runtime_report_interval'))
         scan_interval = _coerce_scan_interval(hub_cfg.get('runtime_scan_interval'))
 
         if ws_url != last_ws_url:
@@ -376,10 +383,17 @@ def _run_hub_client(hub_name: str) -> None:
         ws = None
         try:
             ws = websocket.create_connection(ws_url, timeout=10)
-            _send_json(ws, send_lock, {'type': 'hello', 'token': token})
-            await_hello_acknowledgement(ws)
+            _send_json(ws, send_lock, {
+                'type': 'hello',
+                'token': token,
+                'protocol_version': 2,
+                'capabilities': ['event_driven_runtime_v2'],
+            })
+            acknowledgement = await_hello_acknowledgement(ws)
+            require_event_driven_runtime(acknowledgement)
             ws.settimeout(min(scan_interval, 0.2))
-            last_signature = _send_runtime_report(ws, send_lock)
+            runtime_session = RuntimeStateSession(ws, send_lock)
+            runtime_session.send_sync()
             logging.info('[hub-ws] Connecté à "%s"', hub_name)
 
             # Une ouverture TCP/WebSocket suivie d'un refus d'authentification
@@ -387,7 +401,6 @@ def _run_hub_client(hub_name: str) -> None:
             # backoff. Seul hello_ack rend la connexion exploitable.
             reconnect_backoff.reset_after_authentication()
             next_scan_at = time.monotonic() + scan_interval
-            next_report_at = time.monotonic() + interval
             next_config_check_at = time.monotonic() + 5
             next_artifact_notification_at = time.monotonic()
             next_command_ack_replay_at = time.monotonic()
@@ -404,15 +417,8 @@ def _run_hub_client(hub_name: str) -> None:
                         logging.info('[hub-ws] Config changée pour "%s", reconnexion', hub_name)
                         break
 
-                if now >= next_scan_at or now >= next_report_at:
-                    payload = _build_runtime_report()
-                    signature = runtime_report_signature(payload)
-                    heartbeat_due = now >= next_report_at
-
-                    if heartbeat_due or signature != last_signature:
-                        last_signature = _send_runtime_report(ws, send_lock, payload)
-                        next_report_at = now + interval
-
+                if now >= next_scan_at:
+                    runtime_session.send_if_changed()
                     next_scan_at = now + scan_interval
 
                 if now >= next_artifact_notification_at:
@@ -420,10 +426,15 @@ def _run_hub_client(hub_name: str) -> None:
                     next_artifact_notification_at = now + 2
 
                 if now >= next_command_ack_replay_at:
-                    _send_pending_command_acknowledgements(ws, send_lock, hub_name)
+                    _send_pending_command_acknowledgements(
+                        ws,
+                        send_lock,
+                        runtime_session,
+                        hub_name,
+                    )
                     next_command_ack_replay_at = now + 2
 
-                _receive_available_messages(ws, send_lock, hub_name)
+                _receive_available_messages(ws, send_lock, runtime_session, hub_name)
 
         except Exception as exc:
             logging.warning('[hub-ws] Déconnecté de "%s" (%s): %s', hub_name, ws_url, exc)

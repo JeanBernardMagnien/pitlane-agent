@@ -1,0 +1,47 @@
+{
+  "type": "runtime_state",
+  "schema_version": 2,
+  "mode": "sync",
+  "agent_boot_id": "7baab7b4-8b8f-4b6e-aeb3-40ca1b665e55",
+  "runtime_revision": 12,
+  "payload": {
+    "agent": {
+      "version": "0.5.0",
+      "health": "healthy",
+      "health_reasons": []
+    },
+    "instances": [
+      {
+        "id": "race-1",
+        "status": "running",
+        "pid": 4212,
+        "started_at": "2026-08-25T12:00:00Z",
+        "connected_drivers": 18,
+        "drivers_seen_at": "2026-08-25T12:05:00Z",
+        "drivers_source": "http",
+        "drivers_conflict": false,
+        "drivers_zero_confirmed": false,
+        "log_connected_drivers": 18,
+        "log_drivers_seen_at": "2026-08-25T12:04:59Z",
+        "http_connected_drivers": 18,
+        "http_ok": true,
+        "http_error": null,
+        "session_phase": "race",
+        "session_observed_at": "2026-08-25T12:03:00Z",
+        "sport_started_at": "2026-08-25T12:01:00Z",
+        "race_started_at": "2026-08-25T12:03:00Z",
+        "season_restart_count": 0,
+        "season_restart_observed_at": null,
+        "first_driver_seen_at": "2026-08-25T12:01:30Z",
+        "log_observed_from_start": true,
+        "exit_code": null,
+        "exit_observed_at": null,
+        "exit_origin": null,
+        "stop_requested_at": null,
+        "stop_reason": null,
+        "crash_detected_at": null,
+        "crash_message": null
+      }
+    ]
+  }
+}
