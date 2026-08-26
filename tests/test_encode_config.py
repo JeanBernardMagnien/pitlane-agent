@@ -88,5 +88,40 @@ class EncodeConfigTest(unittest.TestCase):
             season_definition["game_config"]["practice_time_of_day"]["time_multiplier"],
         )
 
+    def test_omits_mandatory_pitstop_fields_when_rule_is_off(self):
+        _, season_definition = decode_config(encode_payload(self.config)[1])
+
+        self.assertNotIn("mandatory_pit_stop", season_definition["game_config"])
+        self.assertNotIn("requires_tyre_change", season_definition["game_config"])
+        self.assertNotIn("requires_refuelling", season_definition["game_config"])
+        self.assertNotIn("pit_window", season_definition["game_config"])
+
+    def test_maps_mandatory_pitstop_to_native_acevo_fields(self):
+        self.config["Sessions"]["RaceSession"]["MandatoryPitStop"] = {
+            "RequiresTyreChange": True,
+            "RequiresRefuelling": False,
+            "WindowDurationSeconds": 600,
+        }
+
+        _, season_definition = decode_config(encode_payload(self.config)[1])
+
+        self.assertEqual(
+            {
+                "mandatory_pit_stop": True,
+                "requires_tyre_change": True,
+                "requires_refuelling": False,
+                "pit_window": 600,
+            },
+            {
+                key: season_definition["game_config"][key]
+                for key in (
+                    "mandatory_pit_stop",
+                    "requires_tyre_change",
+                    "requires_refuelling",
+                    "pit_window",
+                )
+            },
+        )
+
 if __name__ == "__main__":
     unittest.main()

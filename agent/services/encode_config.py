@@ -41,6 +41,12 @@ def _apply_session(game_config: dict, source_key: str, session: dict) -> None:
 
     if source_key == 'RaceSession':
         game_config["race_duration_type"] = "GameModeSelectionDuration_TIME"
+        mandatory_pitstop = session.get('MandatoryPitStop')
+        if isinstance(mandatory_pitstop, dict):
+            game_config["mandatory_pit_stop"] = True
+            game_config["requires_tyre_change"] = bool(mandatory_pitstop['RequiresTyreChange'])
+            game_config["requires_refuelling"] = bool(mandatory_pitstop['RequiresRefuelling'])
+            game_config["pit_window"] = int(mandatory_pitstop['WindowDurationSeconds'])
 
 
 def encode_payload(cfg: dict) -> tuple[str, str]:
