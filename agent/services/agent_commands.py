@@ -34,7 +34,6 @@ from services.steam_manager import (
     get_steam_update_logs,
     start_steam_update,
 )
-from services.acevo_catalog import catalog_snapshot
 
 
 def _error(message: str, status_code: int = 400) -> tuple[dict, int]:
@@ -468,9 +467,6 @@ def execute_agent_command(command: str, payload: dict | None = None) -> tuple[di
 
     if command in ('steam_update_logs', 'get_steam_update_logs'):
         return get_steam_update_logs(config_store.LOGGING_CFG)
-
-    if command == 'acevo_catalog_snapshot':
-        return catalog_snapshot(config_store.GAME_CFG, config_store.CFG.get('steam', {}))
 
     handler = COMMANDS.get(command)
     if not handler:
