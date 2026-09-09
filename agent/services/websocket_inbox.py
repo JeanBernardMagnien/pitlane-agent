@@ -17,7 +17,7 @@ def drain_available_messages(
         except timeout_exception:
             break
 
-        if raw_message is None:
+        if raw_message is None or raw_message == '' or raw_message == b'':
             raise closed_exception()
 
         handle_message(raw_message)

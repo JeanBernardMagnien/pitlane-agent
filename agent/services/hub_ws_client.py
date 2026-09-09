@@ -20,6 +20,7 @@ from services.runtime_reporter import (
 )
 from services.runtime_state_session import RuntimeStateSession
 from services.websocket_inbox import drain_available_messages
+from services.websocket_heartbeat import HubHeartbeat
 from services.websocket_authentication import (
     ReconnectBackoff,
     await_hello_acknowledgement,
@@ -286,6 +287,7 @@ def _handle_message(
     runtime_session: RuntimeStateSession,
     hub_name: str,
     raw_message: str,
+    heartbeat: HubHeartbeat | None = None,
 ) -> None:
     try:
         message = json.loads(raw_message)
@@ -296,6 +298,15 @@ def _handle_message(
         return
 
     message_type = message.get('type')
+
+    if message_type not in (
+        'command', 'command_ack_confirmed', 'ping', 'pong',
+        'runtime_state_request', 'runtime_state_ack', 'result_artifact_available_ack',
+    ):
+        return
+
+    if heartbeat is not None:
+        heartbeat.mark_received()
 
     if message_type == 'command':
         if int(message.get('schema_version') or 1) >= 2:
@@ -322,18 +333,26 @@ def _receive_available_messages(
     send_lock: threading.Lock,
     runtime_session: RuntimeStateSession,
     hub_name: str,
+    heartbeat: HubHeartbeat,
     limit: int = MAX_INBOUND_MESSAGES_PER_CYCLE,
 ) -> int:
     """Drain a bounded batch so runtime acknowledgements cannot starve commands."""
     import websocket
 
-    return drain_available_messages(
+    def handle_message(raw_message):
+        heartbeat.require_alive()
+        _handle_message(ws, send_lock, runtime_session, hub_name, raw_message, heartbeat)
+
+    heartbeat.require_alive()
+    received = drain_available_messages(
         ws,
-        lambda raw_message: _handle_message(ws, send_lock, runtime_session, hub_name, raw_message),
+        handle_message,
         websocket.WebSocketTimeoutException,
         websocket.WebSocketConnectionClosedException,
         limit,
     )
+    heartbeat.require_alive()
+    return received
 
 
 def _find_hub_cfg(hub_name: str) -> dict | None:
@@ -381,6 +400,7 @@ def _run_hub_client(hub_name: str) -> None:
             last_ws_url = ws_url
 
         ws = None
+        failure_delay = None
         try:
             ws = websocket.create_connection(ws_url, timeout=10)
             _send_json(ws, send_lock, {
@@ -392,6 +412,7 @@ def _run_hub_client(hub_name: str) -> None:
             acknowledgement = await_hello_acknowledgement(ws)
             require_event_driven_runtime(acknowledgement)
             ws.settimeout(min(scan_interval, 0.2))
+            heartbeat = HubHeartbeat()
             runtime_session = RuntimeStateSession(ws, send_lock)
             runtime_session.send_sync()
             logging.info('[hub-ws] Connecté à "%s"', hub_name)
@@ -406,6 +427,9 @@ def _run_hub_client(hub_name: str) -> None:
             next_command_ack_replay_at = time.monotonic()
 
             while not _stop_event.is_set():
+                _receive_available_messages(ws, send_lock, runtime_session, hub_name, heartbeat)
+                if _stop_event.is_set():
+                    break
                 now = time.monotonic()
 
                 if now >= next_config_check_at:
@@ -421,9 +445,13 @@ def _run_hub_client(hub_name: str) -> None:
                     runtime_session.send_if_changed()
                     next_scan_at = now + scan_interval
 
+                heartbeat.require_alive()
+
                 if now >= next_artifact_notification_at:
                     _send_artifact_notifications(ws, send_lock, hub_name, hub_cfg.get('base_url'))
                     next_artifact_notification_at = now + 2
+
+                heartbeat.require_alive()
 
                 if now >= next_command_ack_replay_at:
                     _send_pending_command_acknowledgements(
@@ -434,17 +462,22 @@ def _run_hub_client(hub_name: str) -> None:
                     )
                     next_command_ack_replay_at = now + 2
 
-                _receive_available_messages(ws, send_lock, runtime_session, hub_name)
+                heartbeat.require_alive()
 
         except Exception as exc:
             logging.warning('[hub-ws] Déconnecté de "%s" (%s): %s', hub_name, ws_url, exc)
-            _stop_event.wait(reconnect_backoff.next_failure_delay())
+            failure_delay = reconnect_backoff.next_failure_delay()
         finally:
             if ws is not None:
                 try:
-                    ws.close()
+                    # Release the stale transport before the backoff, without
+                    # waiting for a close frame from an unreachable Hub.
+                    ws.close(timeout=0)
                 except Exception:
                     pass
+
+        if failure_delay is not None:
+            _stop_event.wait(failure_delay)
 
 
 
